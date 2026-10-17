@@ -16,7 +16,7 @@ void callbackDispatcher() {
       final queueJson = prefs.getStringList(_kPendingSyncQueueKey) ?? [];
 
       if (queueJson.isEmpty) {
-        return Future.value(true);
+        return true;
       }
 
       // Initialize Supabase in background isolate
@@ -40,9 +40,9 @@ void callbackDispatcher() {
       }
 
       await prefs.setStringList(_kPendingSyncQueueKey, remainingItems);
-      return Future.value(true);
+      return true;
     } catch (_) {
-      return Future.value(false);
+      return false;
     }
   });
 }

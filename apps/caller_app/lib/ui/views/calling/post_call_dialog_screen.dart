@@ -452,7 +452,7 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                     ),
                     _buildOutcomeButton(
                       label: 'Busy / Declined',
-                      icon: Icons.phone_busy_rounded,
+                      icon: Icons.phone_missed_rounded,
                       outcome: PostCallOutcome.busy,
                       callingVm: callingVm,
                       color: AppTheme.warning,

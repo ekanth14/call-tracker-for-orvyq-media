@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/core/config/app_config.dart';
-import '../lib/core/utils/phone_formatter.dart';
-import '../lib/core/utils/date_formatter.dart';
-import '../lib/data/models/device_call_log_model.dart';
+import 'package:caller_app/core/config/app_config.dart';
+import 'package:caller_app/core/utils/phone_formatter.dart';
+import 'package:caller_app/core/utils/date_formatter.dart';
+import 'package:caller_app/data/models/device_call_log_model.dart';
 
 void main() {
   group('PhoneFormatter Tests', () {

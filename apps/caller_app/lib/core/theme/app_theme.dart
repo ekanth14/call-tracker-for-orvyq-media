@@ -30,7 +30,6 @@ class AppTheme {
         seedColor: primary,
         primary: primary,
         secondary: secondary,
-        background: background,
         surface: surface,
         error: danger,
       ),
@@ -48,7 +47,7 @@ class AppTheme {
           fontWeight: FontWeight.w700,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surface,
         elevation: 0,
         shape: RoundedRectangleBorder(

@@ -199,7 +199,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: const Row(
                     children: [
                       Icon(Icons.info_outline, color: AppTheme.textMuted, size: 18),
-                      const SizedBox(width: 8),
+                      SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Accounts are provisioned by your manager. If you need credentials, contact your team owner.',

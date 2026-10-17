@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/phone_formatter.dart';
 import '../../view_models/calling_view_model.dart';
 import '../../view_models/queue_view_model.dart';
@@ -99,6 +100,7 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
   Widget build(BuildContext context) {
     final callingVm = context.watch<CallingViewModel>();
     final lead = callingVm.activeLead;
+    final matchedLog = callingVm.matchedCallLog;
 
     return PopScope(
       canPop: false, // Mandatory: Call Lock enforces completion (§5 & §8)
@@ -114,35 +116,124 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Call Lock Warning Badge
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.warningLight,
-                    borderRadius: BorderRadius.circular(8),
-                    border:
-                        Border.all(color: AppTheme.warning.withOpacity(0.3)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.lock_rounded,
-                          size: 16, color: AppTheme.warning),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Call Lock Active: Submitting unlocks your next lead.',
-                          style: TextStyle(
+                // 1. Call-Log Verification Proof Badge (§5.4 & §7)
+                if (matchedLog != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.successLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.success.withOpacity(0.4)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.verified_rounded,
+                                color: AppTheme.success, size: 20),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Verified SIM Call Log Proof',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.success,
+                              ),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                DateFormatter.formatDuration(
+                                    matchedLog.durationSecs),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.success,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Started: ${DateFormat('hh:mm:ss a').format(matchedLog.startedAt.toLocal())}'
+                          '${matchedLog.simSlot != null ? " • SIM: ${matchedLog.simSlot}" : ""}',
+                          style: const TextStyle(
                             fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF92400E),
+                            color: Color(0xFF065F46),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
+                  const SizedBox(height: 14),
+                ] else if (callingVm.detectionTimedOut) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.warningLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.warning.withOpacity(0.4)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.phone_missed_rounded,
+                                color: AppTheme.warning, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'No Matching Call Detected in Log',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF92400E),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'If the call just ended, the phone may still be writing the log entry.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => callingVm.detectCallLog(),
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('Retry Detection',
+                                  style: TextStyle(fontSize: 12)),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(0, 36),
+                                foregroundColor: const Color(0xFF92400E),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            TextButton(
+                              onPressed: () {
+                                callingVm.setDurationSecs(0);
+                                callingVm.setOutcome(PostCallOutcome.notPlaced);
+                              },
+                              child: const Text('Mark "Call Not Placed"',
+                                  style: TextStyle(fontSize: 12)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
 
                 // Lead Info Summary Card
                 Container(
@@ -230,9 +321,14 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                             child: TextField(
                               controller: _durationController,
                               keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
+                              readOnly: matchedLog != null, // Lock if verified from log
+                              decoration: InputDecoration(
                                 hintText: 'Duration in seconds',
                                 suffixText: 'secs',
+                                suffixIcon: matchedLog != null
+                                    ? const Icon(Icons.lock,
+                                        size: 16, color: AppTheme.textMuted)
+                                    : null,
                               ),
                               onChanged: (val) {
                                 final secs = int.tryParse(val) ?? 0;
@@ -240,19 +336,21 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                               },
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Wrap(
-                            spacing: 6,
-                            children: [0, 15, 30, 60].map((s) {
-                              return ActionChip(
-                                label: Text('${s}s'),
-                                onPressed: () {
-                                  _durationController.text = s.toString();
-                                  callingVm.setDurationSecs(s);
-                                },
-                              );
-                            }).toList(),
-                          ),
+                          if (matchedLog == null) ...[
+                            const SizedBox(width: 10),
+                            Wrap(
+                              spacing: 6,
+                              children: [0, 15, 30, 60].map((s) {
+                                return ActionChip(
+                                  label: Text('${s}s'),
+                                  onPressed: () {
+                                    _durationController.text = s.toString();
+                                    callingVm.setDurationSecs(s);
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 6),

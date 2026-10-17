@@ -8,7 +8,9 @@ import 'data/repositories/auth_repository.dart';
 import 'data/repositories/calling_repository.dart';
 import 'data/repositories/lead_repository.dart';
 import 'data/repositories/reason_repository.dart';
+import 'data/services/background_sync_service.dart';
 import 'data/services/call_launcher_service.dart';
+import 'data/services/call_log_service.dart';
 import 'data/services/storage_service.dart';
 import 'ui/router/app_router.dart';
 import 'ui/view_models/auth_view_model.dart';
@@ -35,9 +37,13 @@ Future<void> main() async {
 
   final supabase = Supabase.instance.client;
 
-  // Initialize Local Storage & Services
+  // Initialize Local Storage & Background Services
   final storageService = await StorageService.init();
   final callLauncherService = CallLauncherService();
+  final callLogService = CallLogService();
+
+  // Initialize WorkManager background sync (§5.2)
+  await BackgroundSyncService.initialize();
 
   // Initialize Repositories
   final authRepository = AuthRepository(supabase, storageService);
@@ -53,6 +59,7 @@ Future<void> main() async {
     leadRepository,
     reasonRepository,
     callLauncherService,
+    callLogService,
   );
   final statsViewModel = StatsViewModel(callingRepository);
 

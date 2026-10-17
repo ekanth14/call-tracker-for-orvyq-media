@@ -40,9 +40,7 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // When caller finishes the phone call in native dialer and returns to app (§5.3)
     if (state == AppLifecycleState.resumed && mounted) {
-      final callingVm = context.read<CallingViewModel>();
-      callingVm.setDurationSecs(_secondsElapsed);
-      context.go('/dialog');
+      _startVerificationFlow();
     }
   }
 
@@ -53,10 +51,16 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
     super.dispose();
   }
 
-  void _proceedToDialog() {
+  Future<void> _startVerificationFlow() async {
     final callingVm = context.read<CallingViewModel>();
-    callingVm.setDurationSecs(_secondsElapsed);
-    context.go('/dialog');
+    if (callingVm.isDetectingCallLog) return;
+
+    // Start native call-log detection
+    await callingVm.detectCallLog();
+
+    if (mounted) {
+      context.go('/dialog');
+    }
   }
 
   @override
@@ -77,7 +81,7 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
               children: [
                 const Spacer(),
 
-                // Pulsing calling avatar
+                // Pulsing calling avatar or detecting spinner
                 Center(
                   child: Stack(
                     alignment: Alignment.center,
@@ -87,18 +91,24 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
                         height: 120,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: AppTheme.success.withOpacity(0.15),
+                          color: callingVm.isDetectingCallLog
+                              ? AppTheme.primary.withOpacity(0.15)
+                              : AppTheme.success.withOpacity(0.15),
                         ),
                       ),
                       Container(
                         width: 88,
                         height: 88,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: AppTheme.success,
+                          color: callingVm.isDetectingCallLog
+                              ? AppTheme.primary
+                              : AppTheme.success,
                         ),
-                        child: const Icon(
-                          Icons.phone_in_talk_rounded,
+                        child: Icon(
+                          callingVm.isDetectingCallLog
+                              ? Icons.sync_rounded
+                              : Icons.phone_in_talk_rounded,
                           color: Colors.white,
                           size: 40,
                         ),
@@ -172,44 +182,88 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
 
                 const Spacer(),
 
-                // Instruction Card
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.infoLight,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.info.withOpacity(0.3)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline,
-                          color: AppTheme.info, size: 20),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Place the call in your SIM phone dialer. Once finished, return here to complete mandatory disposition notes.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textMain,
-                            height: 1.35,
+                // Detecting or Instruction Card
+                if (callingVm.isDetectingCallLog) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.infoLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.info.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Reading SIM Call Log Proof...',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textMain,
+                                ),
+                              ),
+                              Text(
+                                'Matching outgoing call (${callingVm.detectionSecondsRemaining}s window)',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 20),
+                  const SizedBox(height: 20),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.infoLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.info.withOpacity(0.3)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.info_outline,
+                            color: AppTheme.info, size: 20),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Place the call in your SIM phone dialer. Once finished, tap below to verify call log and submit mandatory notes.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textMain,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-                // Button to proceed to dialog
-                ElevatedButton.icon(
-                  onPressed: _proceedToDialog,
-                  icon: const Icon(Icons.check_circle_outline, size: 20),
-                  label: const Text('Call Finished → Enter Notes'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    minimumSize: const Size.fromHeight(52),
+                  // Button to proceed to detection and dialog
+                  ElevatedButton.icon(
+                    onPressed: _startVerificationFlow,
+                    icon: const Icon(Icons.verified_outlined, size: 20),
+                    label: const Text('Call Finished → Verify Log'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      minimumSize: const Size.fromHeight(52),
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

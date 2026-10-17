@@ -1,12 +1,15 @@
 import 'package:flutter/foundation.dart';
 import '../../core/config/app_config.dart';
+import '../../data/models/device_call_log_model.dart';
 import '../../data/models/dial_attempt_model.dart';
 import '../../data/models/lead_model.dart';
 import '../../data/models/reason_model.dart';
 import '../../data/repositories/calling_repository.dart';
 import '../../data/repositories/lead_repository.dart';
 import '../../data/repositories/reason_repository.dart';
+import '../../data/services/background_sync_service.dart';
 import '../../data/services/call_launcher_service.dart';
+import '../../data/services/call_log_service.dart';
 
 enum PostCallOutcome {
   interested,
@@ -24,12 +27,14 @@ class CallingViewModel extends ChangeNotifier {
   final LeadRepository _leadRepository;
   final ReasonRepository _reasonRepository;
   final CallLauncherService _callLauncherService;
+  final CallLogService _callLogService;
 
   CallingViewModel(
     this._callingRepository,
     this._leadRepository,
     this._reasonRepository,
     this._callLauncherService,
+    this._callLogService,
   );
 
   bool _isCallLocked = false;
@@ -37,6 +42,12 @@ class CallingViewModel extends ChangeNotifier {
   LeadModel? _activeLead;
   bool _isLoading = false;
   String? _errorMessage;
+
+  // Call-Log Detection State (§5.3 & §6)
+  DeviceCallLogModel? _matchedCallLog;
+  bool _isDetectingCallLog = false;
+  bool _detectionTimedOut = false;
+  int _detectionSecondsRemaining = 15;
 
   // Dialog form state
   int _callDurationSecs = 0;
@@ -54,6 +65,11 @@ class CallingViewModel extends ChangeNotifier {
   LeadModel? get activeLead => _activeLead;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  DeviceCallLogModel? get matchedCallLog => _matchedCallLog;
+  bool get isDetectingCallLog => _isDetectingCallLog;
+  bool get detectionTimedOut => _detectionTimedOut;
+  int get detectionSecondsRemaining => _detectionSecondsRemaining;
 
   int get callDurationSecs => _callDurationSecs;
   PostCallOutcome get outcome => _outcome;
@@ -122,7 +138,10 @@ class CallingViewModel extends ChangeNotifier {
       _activeLead = lead;
       _isCallLocked = true;
 
-      // Reset dialog form fields
+      // Reset state & call-log proof
+      _matchedCallLog = null;
+      _isDetectingCallLog = false;
+      _detectionTimedOut = false;
       _callDurationSecs = 0;
       _outcome = PostCallOutcome.ringing;
       _selectedReasonIds.clear();
@@ -147,6 +166,57 @@ class CallingViewModel extends ChangeNotifier {
     } catch (e) {
       _errorMessage = e.toString().replaceAll('Exception:', '').trim();
       _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Reads native Android CallLog to detect and match the newest outgoing call (§5.3)
+  /// Polls asynchronously to accommodate slow OEM log writing.
+  Future<bool> detectCallLog({Duration timeout = const Duration(seconds: 15)}) async {
+    if (_activeLead == null || _activeAttempt == null) return false;
+
+    _isDetectingCallLog = true;
+    _detectionTimedOut = false;
+    _detectionSecondsRemaining = timeout.inSeconds;
+    notifyListeners();
+
+    try {
+      final matched = await _callLogService.matchOutgoingCallForLead(
+        leadPhoneE164: _activeLead!.phoneE164,
+        dialedAfter: _activeAttempt!.dialedAt,
+        timeout: timeout,
+        onProgress: (remaining) {
+          _detectionSecondsRemaining = remaining;
+          notifyListeners();
+        },
+      );
+
+      _isDetectingCallLog = false;
+
+      if (matched != null) {
+        _matchedCallLog = matched;
+        _callDurationSecs = matched.durationSecs;
+
+        // Auto-configure initial outcome based on 10s rule (§5.1)
+        if (matched.isConnected) {
+          _outcome = PostCallOutcome.interested;
+        } else {
+          _outcome = PostCallOutcome.ringing;
+        }
+
+        notifyListeners();
+        return true;
+      } else {
+        _matchedCallLog = null;
+        _detectionTimedOut = true;
+        _outcome = PostCallOutcome.notPlaced;
+        notifyListeners();
+        return false;
+      }
+    } catch (_) {
+      _isDetectingCallLog = false;
+      _detectionTimedOut = true;
       notifyListeners();
       return false;
     }
@@ -199,6 +269,7 @@ class CallingViewModel extends ChangeNotifier {
   }
 
   /// Submits the mandatory post-call dialog and unlocks the queue
+  /// If offline or network fails, queues to WorkManager for background sync (§5.2)
   Future<bool> submitDialog() async {
     if (_activeAttempt == null || _activeLead == null) {
       _errorMessage = 'No active dial attempt found to submit.';
@@ -236,14 +307,18 @@ class CallingViewModel extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    try {
-      final dbOutcome = _outcomeToString(_outcome);
+    final dbOutcome = _outcomeToString(_outcome);
+    final callStartedAt =
+        _matchedCallLog?.startedAt ?? _activeAttempt!.dialedAt;
+    final simSlot = _matchedCallLog?.simSlot;
 
+    try {
       await _callingRepository.submitCallDialog(
         dialAttemptId: _activeAttempt!.id,
         numberE164: _activeLead!.phoneE164,
-        startedAt: _activeAttempt!.dialedAt,
+        startedAt: callStartedAt,
         durationSecs: _callDurationSecs,
+        simSlot: simSlot,
         callerClaimedConnected: isConnected,
         outcome: dbOutcome,
         reasonIds: _selectedReasonIds,
@@ -258,14 +333,40 @@ class CallingViewModel extends ChangeNotifier {
       _isCallLocked = false;
       _activeAttempt = null;
       _activeLead = null;
+      _matchedCallLog = null;
       _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceAll('Exception:', '').trim();
+      // Offline fallback: Queue for WorkManager background sync (§5.2)
+      final payload = {
+        'p_dial_attempt_id': _activeAttempt!.id,
+        'p_number_e164': _activeLead!.phoneE164,
+        'p_call_type': 'outgoing',
+        'p_started_at': callStartedAt.toUtc().toIso8601String(),
+        'p_duration_secs': _callDurationSecs,
+        'p_sim_slot': simSlot,
+        'p_clock_skew_secs': 0,
+        'p_caller_claimed_connected': isConnected,
+        'p_outcome': dbOutcome,
+        'p_reason_ids': _selectedReasonIds,
+        'p_other_reason_text': _otherReasonText,
+        'p_note': _notes,
+        'p_seconds_after_call_end': 0,
+        'p_follow_up_due_at': _followUpDateTime?.toUtc().toIso8601String(),
+        'p_follow_up_type': _followUpDateTime != null ? _followUpType : null,
+      };
+
+      await BackgroundSyncService.enqueuePendingSync(payload);
+
+      // Release Call Lock locally so caller is not blocked when offline
+      _isCallLocked = false;
+      _activeAttempt = null;
+      _activeLead = null;
+      _matchedCallLog = null;
       _isLoading = false;
       notifyListeners();
-      return false;
+      return true;
     }
   }
 
@@ -276,7 +377,7 @@ class CallingViewModel extends ChangeNotifier {
       case PostCallOutcome.notInterested:
         return 'not_interested';
       case PostCallOutcome.callback:
-        return 'interested'; // follow-up handles callback
+        return 'interested';
       case PostCallOutcome.wrongNumber:
         return 'wrong_number';
       case PostCallOutcome.ringing:

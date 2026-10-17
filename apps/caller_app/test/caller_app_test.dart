@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/config/app_config.dart';
 import '../lib/core/utils/phone_formatter.dart';
 import '../lib/core/utils/date_formatter.dart';
+import '../lib/data/models/device_call_log_model.dart';
 
 void main() {
   group('PhoneFormatter Tests', () {
@@ -94,23 +95,81 @@ void main() {
         activeAttemptId = null;
       }
 
-      // Step 1: Start call 1
       startDial('attempt-1');
       expect(isCallLocked, isTrue);
       expect(activeAttemptId, 'attempt-1');
 
-      // Step 2: Attempting call 2 while locked throws
       expect(() => startDial('attempt-2'), throwsException);
 
-      // Step 3: Complete dialog 1 unlocks
       submitDialog();
       expect(isCallLocked, isFalse);
       expect(activeAttemptId, isNull);
 
-      // Step 4: Now call 2 succeeds
       startDial('attempt-2');
       expect(isCallLocked, isTrue);
       expect(activeAttemptId, 'attempt-2');
+    });
+  });
+
+  group('DeviceCallLogModel & On-Device Matching (§5.3 & §6)', () {
+    test('serializes and deserializes DeviceCallLogModel correctly', () {
+      final model = DeviceCallLogModel(
+        numberE164: '+918971027214',
+        rawNumber: '08971027214',
+        callType: 'outgoing',
+        startedAt: DateTime.parse('2026-10-17T14:00:00Z'),
+        durationSecs: 45,
+        simSlot: 'SIM 1 (Jio)',
+        timestampMillis: 1792245600000,
+      );
+
+      expect(model.isOutgoing, isTrue);
+      expect(model.isConnected, isTrue);
+
+      final json = model.toJson();
+      final revived = DeviceCallLogModel.fromJson(json);
+
+      expect(revived.numberE164, '+918971027214');
+      expect(revived.durationSecs, 45);
+      expect(revived.simSlot, 'SIM 1 (Jio)');
+      expect(revived.isConnected, isTrue);
+    });
+
+    test('significant digits matching handles local dial prefixes correctly', () {
+      String extractDigits(String phone) {
+        final digits = phone.replaceAll(RegExp(r'\D'), '');
+        return digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+      }
+
+      final leadTarget = extractDigits('+918971027214');
+
+      // Matching dial formats
+      expect(extractDigits('8971027214'), leadTarget);
+      expect(extractDigits('08971027214'), leadTarget);
+      expect(extractDigits('+918971027214'), leadTarget);
+      expect(extractDigits('00918971027214'), leadTarget);
+
+      // Non-matching numbers
+      expect(extractDigits('+919876543210') == leadTarget, isFalse);
+    });
+
+    test('strict privacy rule: ignores non-assigned personal call logs (§6)', () {
+      final assignedLeads = {'8971027214', '9845012345'};
+
+      bool shouldUploadLog(String logNumber) {
+        final digits = logNumber.replaceAll(RegExp(r'\D'), '');
+        final sig = digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+        return assignedLeads.contains(sig);
+      }
+
+      // Work call
+      expect(shouldUploadLog('+918971027214'), isTrue);
+
+      // Personal call (e.g. family, friend, bank)
+      expect(shouldUploadLog('+919999988888'), isFalse,
+          reason: 'Personal calls must never be uploaded');
+      expect(shouldUploadLog('198'), isFalse,
+          reason: 'Customer care calls must never be uploaded');
     });
   });
 }

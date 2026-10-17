@@ -11,7 +11,8 @@ class PermissionStatusReport {
     required this.batteryOptimizationIgnored,
   });
 
-  bool get allEssentialGranted => phoneGranted;
+  bool get allEssentialGranted =>
+      phoneGranted && batteryOptimizationIgnored;
 }
 
 class PermissionService {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/services/background_sync_service.dart';
 import '../../../data/services/permission_service.dart';
 
 class HealthCheckScreen extends StatefulWidget {
@@ -12,6 +13,7 @@ class HealthCheckScreen extends StatefulWidget {
 class _HealthCheckScreenState extends State<HealthCheckScreen> {
   final _permissionService = PermissionService();
   PermissionStatusReport? _report;
+  int _pendingSyncCount = 0;
   bool _isLoading = true;
 
   @override
@@ -23,9 +25,11 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
   Future<void> _checkStatus() async {
     setState(() => _isLoading = true);
     final report = await _permissionService.checkPermissions();
+    final count = await BackgroundSyncService.getPendingSyncCount();
     if (mounted) {
       setState(() {
         _report = report;
+        _pendingSyncCount = count;
         _isLoading = false;
       });
     }
@@ -37,6 +41,12 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Device Health & Permissions'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _checkStatus,
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -105,6 +115,59 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
                   ),
                   const SizedBox(height: 20),
 
+                  // Background Sync Status Card (§5.2)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Background Sync (WorkManager)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.textMain,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Icon(
+                              _pendingSyncCount == 0
+                                  ? Icons.cloud_done_rounded
+                                  : Icons.cloud_upload_outlined,
+                              color: _pendingSyncCount == 0
+                                  ? AppTheme.success
+                                  : AppTheme.warning,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _pendingSyncCount == 0
+                                    ? 'All call proofs synchronized with server.'
+                                    : '$_pendingSyncCount offline call proof(s) pending sync.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: _pendingSyncCount == 0
+                                      ? AppTheme.textMain
+                                      : const Color(0xFF92400E),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
                   const Text(
                     'Permissions Status',
                     style: TextStyle(
@@ -115,11 +178,11 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
                   ),
                   const SizedBox(height: 10),
 
-                  // Phone / Calling permission
+                  // Phone / Call Log permission
                   _buildPermissionTile(
-                    title: 'Phone & Dialer Permission',
+                    title: 'Phone & Call Log Permission',
                     description:
-                        'Allows launching calls directly to assigned leads from your SIM.',
+                        'Allows reading outgoing duration and timestamp for assigned leads only (§6).',
                     isGranted: _report?.phoneGranted ?? false,
                     onRequest: () async {
                       await _permissionService.requestPhonePermission();
@@ -131,7 +194,7 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
                   _buildPermissionTile(
                     title: 'Battery Optimization Exemption',
                     description:
-                        'Prevents phone manufacturers from killing the app in the background.',
+                        'Prevents phone manufacturers from killing the app in the background (§5.2).',
                     isGranted: _report?.batteryOptimizationIgnored ?? false,
                     onRequest: () async {
                       await _permissionService.requestBatteryExemption();

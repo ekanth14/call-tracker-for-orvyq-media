@@ -50,8 +50,12 @@ async function createOwner() {
   let userId: string;
 
   if (existing) {
-    console.log(`ℹ️ User ${email} already exists in auth. Updating profile to owner...`);
+    console.log(`ℹ️ User ${email} already exists in auth. Updating profile and password...`);
     userId = existing.id;
+    if (passArg) {
+      await supabase.auth.admin.updateUserById(userId, { password: passArg });
+      console.log(`🔑 Password updated for ${email}`);
+    }
   } else {
     // Create new owner user in auth
     const { data: newUser, error: createError } = await supabase.auth.admin.createUser({

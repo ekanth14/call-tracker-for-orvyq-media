@@ -12,11 +12,14 @@
     "test": "vitest run",
     "test:phone": "vitest run apps/web/tests/phone.test.ts",
     "test:rls": "tsx supabase/tests/rls_caller_isolation.test.ts",
+    "db:migrate": "tsx scripts/migrate.ts",
     "create-owner": "tsx scripts/create-owner.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.49.1",
+    "@types/pg": "^8.23.1",
     "dotenv": "^16.4.7",
+    "pg": "^8.23.1",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vitest": "^3.0.7"

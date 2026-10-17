@@ -552,7 +552,11 @@ INSERT INTO reasons (outcome, label, sort_order, is_active) VALUES
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
 BEGIN
     INSERT INTO public.profiles (
         id,
@@ -565,8 +569,8 @@ BEGIN
         NEW.id,
         COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
         NEW.email,
-        COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'caller'::user_role),
-        NEW.raw_user_meta_data->>'mobile_e164',
+        COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'caller'::public.user_role),
+        NULLIF(NEW.raw_user_meta_data->>'mobile_e164', ''),
         true
     )
     ON CONFLICT (id) DO UPDATE SET
@@ -575,8 +579,10 @@ BEGIN
         updated_at = timezone('utc'::text, now());
 
     RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created

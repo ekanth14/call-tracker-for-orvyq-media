@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     const admin = createAdminClient();
 
     // 3. Create user in auth
+    let userId: string | null = null;
     const { data: authUser, error: authError } = await admin.auth.admin.createUser({
       email,
       password,
@@ -50,12 +51,42 @@ export async function POST(req: NextRequest) {
     });
 
     if (authError) {
-      return NextResponse.json({ error: authError.message }, { status: 400 });
+      const isAlreadyRegistered =
+        authError.message.toLowerCase().includes("already registered") ||
+        authError.message.toLowerCase().includes("already been registered");
+
+      if (isAlreadyRegistered) {
+        const { data: userList } = await admin.auth.admin.listUsers();
+        const existing = userList?.users?.find(
+          (u) => u.email?.toLowerCase() === email.toLowerCase()
+        );
+        if (existing) {
+          userId = existing.id;
+          await admin.auth.admin.updateUserById(existing.id, {
+            password,
+            user_metadata: {
+              full_name,
+              role: "caller",
+              mobile_e164: mobile_e164 || null,
+            },
+          });
+        } else {
+          return NextResponse.json({ error: authError.message }, { status: 400 });
+        }
+      } else {
+        return NextResponse.json({ error: authError.message }, { status: 400 });
+      }
+    } else {
+      userId = authUser.user.id;
+    }
+
+    if (!userId) {
+      return NextResponse.json({ error: "Failed to establish user account." }, { status: 500 });
     }
 
     // 4. Ensure profiles table row exists with role caller
     const { error: profileError } = await admin.from("profiles").upsert({
-      id: authUser.user.id,
+      id: userId,
       full_name,
       email,
       role: "caller",

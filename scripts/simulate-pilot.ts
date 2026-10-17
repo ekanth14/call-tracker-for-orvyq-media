@@ -3,10 +3,34 @@
 
 import { createClient } from "@supabase/supabase-js";
 import * as dotenv from "dotenv";
-dotenv.config({ path: "apps/web/.env.local" });
+import * as path from "path";
+import * as fs from "fs";
+
+// Resolve .env.local regardless of current working directory
+const envCandidates = [
+  path.resolve(process.cwd(), "apps/web/.env.local"),
+  path.resolve(process.cwd(), "../web/.env.local"),
+  path.resolve(process.cwd(), ".env.local"),
+  path.resolve(__dirname, "../../apps/web/.env.local"),
+  path.resolve(__dirname, "../apps/web/.env.local"),
+  path.resolve(__dirname, "../.env.local"),
+];
+
+for (const p of envCandidates) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+    break;
+  }
+}
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+if (!supabaseUrl || !serviceRoleKey) {
+  console.error("❌ Could not find NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
+  console.error("Checked locations:", envCandidates);
+  process.exit(1);
+}
 
 const admin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -29,7 +53,7 @@ async function runPilotSimulation() {
   console.log(`👤 Using Pilot Caller: ${callerProfile.full_name} (${callerProfile.email})`);
 
   // 2. Find an assigned lead for this caller
-  const { data: lead, error: leadErr } = await admin
+  const { data: lead } = await admin
     .from("leads")
     .select("id, name, phone_e164, status")
     .eq("assigned_to", callerProfile.id)
@@ -62,7 +86,6 @@ async function runPilotSimulation() {
   console.log(`📞 Target Lead: ${targetPhone} (ID: ${targetLeadId})`);
 
   // 3. Authenticate as caller
-  // Generate a direct access token or use caller context
   console.log("\n--- Step 1: Starting Dial Attempt (Enforcing Call Lock) ---");
   const deviceId = crypto.randomUUID();
 
@@ -108,12 +131,12 @@ async function runPilotSimulation() {
 
   // 4. Simulate SIM Call & Post-Call Dialog Submission
   console.log("\n--- Step 3: Submitting Call Proof & Mandatory Dialog ---");
-  const callDurationSecs = 48; // ≥ 10s connected
+  const callDurationSecs = 52; // ≥ 10s connected
   const startedAt = new Date(Date.now() - callDurationSecs * 1000).toISOString();
 
   // Insert device call log proof
   const dedupeKey = `${deviceId}_${targetPhone}_${Date.now()}_${callDurationSecs}`;
-  const { data: logEntry, error: logErr } = await admin
+  const { error: logErr } = await admin
     .from("device_call_log_entries")
     .insert({
       dial_attempt_id: dialAttempt.id,
@@ -137,12 +160,11 @@ async function runPilotSimulation() {
   }
 
   // Insert Call
-  const { data: callRow, error: callErr } = await admin
+  const { data: callRow } = await admin
     .from("calls")
     .insert({
       lead_id: targetLeadId,
       caller_id: callerProfile.id,
-      device_call_log_entry_id: logEntry?.id || null,
       source: "device_log",
       status: "closed",
       initiated_at: dialAttempt.dialed_at,
@@ -153,7 +175,7 @@ async function runPilotSimulation() {
     .single();
 
   // Insert Disposition
-  const { data: disp, error: dispErr } = await admin
+  await admin
     .from("dispositions")
     .insert({
       call_id: callRow.id,
@@ -186,7 +208,7 @@ async function runPilotSimulation() {
     .eq("id", targetLeadId);
 
   console.log("🔓 Call Lock released: dial_attempt marked closed.");
-  console.log("✅ Disposition recorded: outcome = 'interested', connected = true");
+  console.log("✅ Disposition recorded: outcome = 'interested', connected = true (talk_secs = 52s)");
   console.log("✅ Lead updated to status 'interested'.");
 
   console.log("\n🎉 Pilot Simulation Finished Successfully!");

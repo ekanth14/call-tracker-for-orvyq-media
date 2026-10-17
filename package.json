@@ -13,7 +13,8 @@
     "test:phone": "vitest run apps/web/tests/phone.test.ts",
     "test:rls": "tsx supabase/tests/rls_caller_isolation.test.ts",
     "db:migrate": "tsx scripts/migrate.ts",
-    "create-owner": "tsx scripts/create-owner.ts"
+    "create-owner": "tsx scripts/create-owner.ts",
+    "simulate:pilot": "tsx scripts/simulate-pilot.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.49.1",

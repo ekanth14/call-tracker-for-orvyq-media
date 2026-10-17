@@ -146,5 +146,5 @@ describe("Supabase Row Level Security (RLS) Isolation Suite", () => {
     await adminClient.auth.admin.deleteUser(userA.user.id);
     await adminClient.auth.admin.deleteUser(userB.user.id);
     await adminClient.auth.admin.deleteUser(userOwner.user.id);
-  });
+  }, 30000);
 });

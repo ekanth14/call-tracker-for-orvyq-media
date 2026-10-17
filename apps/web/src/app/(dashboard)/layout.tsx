@@ -10,6 +10,8 @@ import {
   History,
   LogOut,
   ShieldCheck,
+  BarChart3,
+  ShieldAlert,
 } from "lucide-react";
 
 export default async function DashboardLayout({
@@ -89,6 +91,22 @@ export default async function DashboardLayout({
           >
             <History className="h-4 w-4 text-purple-400" />
             Call Log
+          </Link>
+
+          <Link
+            href="/reports"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition"
+          >
+            <BarChart3 className="h-4 w-4 text-sky-400" />
+            Reports & Reasons
+          </Link>
+
+          <Link
+            href="/flags"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition"
+          >
+            <ShieldAlert className="h-4 w-4 text-rose-400" />
+            Audit Flags
           </Link>
         </nav>
 

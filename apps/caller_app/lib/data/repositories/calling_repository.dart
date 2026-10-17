@@ -1,0 +1,165 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/dial_attempt_model.dart';
+import '../models/stats_model.dart';
+import '../services/storage_service.dart';
+
+class CallingRepository {
+  final SupabaseClient _supabase;
+  final StorageService _storageService;
+
+  CallingRepository(this._supabase, this._storageService);
+
+  /// Checks if the current caller has an open dial attempt with no submitted dialog.
+  /// Enforces client-side Call Lock (§5 & §8).
+  Future<DialAttemptModel?> checkActiveCallLock() async {
+    final callerId = _supabase.auth.currentUser?.id;
+    if (callerId == null) return null;
+
+    final response = await _supabase
+        .from('dial_attempts')
+        .select('*')
+        .eq('caller_id', callerId)
+        .eq('status', 'open')
+        .order('dialed_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+
+    if (response == null) return null;
+    return DialAttemptModel.fromJson(response);
+  }
+
+  /// Initiates a dial attempt on the server, enforcing server-side call lock and lead ownership.
+  Future<Map<String, dynamic>> startDialAttempt({
+    required String leadId,
+  }) async {
+    final deviceId = _storageService.getOrCreateDeviceId();
+
+    try {
+      final res = await _supabase.rpc(
+        'start_dial_attempt',
+        params: {
+          'p_lead_id': leadId,
+          'p_device_id': deviceId,
+        },
+      );
+
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      final message = e.toString();
+      if (message.contains('CALL_LOCKED')) {
+        throw Exception(
+          'Call Locked: You have a pending call attempt that requires post-call notes before making another call.',
+        );
+      }
+      rethrow;
+    }
+  }
+
+  /// Submits the mandatory post-call dialog and matched call-log facts to the server.
+  /// Releases Call Lock and persists immutable disposition.
+  Future<Map<String, dynamic>> submitCallDialog({
+    required String dialAttemptId,
+    required String numberE164,
+    required DateTime startedAt,
+    required int durationSecs,
+    String? simSlot,
+    required bool callerClaimedConnected,
+    required String outcome, // 'interested', 'not_interested', 'callback', etc.
+    required List<String> reasonIds,
+    String? otherReasonText,
+    String? note,
+    int? secondsAfterCallEnd,
+    DateTime? followUpDueAt,
+    String? followUpType, // 'call', 'whatsapp', 'email', 'meeting'
+  }) async {
+    final deviceId = _storageService.getOrCreateDeviceId();
+    final clientTime = DateTime.now().toUtc();
+    final clockSkewSecs = (DateTime.now().toUtc().millisecondsSinceEpoch -
+            clientTime.millisecondsSinceEpoch) ~/
+        1000;
+
+    final res = await _supabase.rpc(
+      'submit_call_dialog',
+      params: {
+        'p_dial_attempt_id': dialAttemptId,
+        'p_device_id': deviceId,
+        'p_number_e164': numberE164,
+        'p_call_type': 'outgoing',
+        'p_started_at': startedAt.toUtc().toIso8601String(),
+        'p_duration_secs': durationSecs,
+        'p_sim_slot': simSlot,
+        'p_clock_skew_secs': clockSkewSecs,
+        'p_caller_claimed_connected': callerClaimedConnected,
+        'p_outcome': outcome,
+        'p_reason_ids': reasonIds,
+        'p_other_reason_text': otherReasonText,
+        'p_note': note,
+        'p_seconds_after_call_end': secondsAfterCallEnd ?? 0,
+        'p_follow_up_due_at': followUpDueAt?.toUtc().toIso8601String(),
+        'p_follow_up_type': followUpType,
+      },
+    );
+
+    return Map<String, dynamic>.from(res as Map);
+  }
+
+  /// Retrieves today's calling metrics for the authenticated caller
+  Future<StatsModel> getTodayStats() async {
+    final callerId = _supabase.auth.currentUser?.id;
+    if (callerId == null) return StatsModel();
+
+    final now = DateTime.now();
+    final startOfDay = DateTime(now.year, now.month, now.day).toUtc();
+
+    try {
+      final callsRes = await _supabase
+          .from('calls')
+          .select('id, talk_secs, dispositions(outcome)')
+          .eq('caller_id', callerId)
+          .gte('initiated_at', startOfDay.toIso8601String());
+
+      final List<dynamic> calls = callsRes as List<dynamic>;
+      final totalCalls = calls.length;
+      int connectedCalls = 0;
+      int interestedCount = 0;
+
+      for (final call in calls) {
+        final talkSecs = (call['talk_secs'] as num?)?.toInt() ?? 0;
+        if (talkSecs >= 10) {
+          connectedCalls++;
+        }
+        final disp = call['dispositions'];
+        if (disp != null) {
+          if (disp is List && disp.isNotEmpty) {
+            if (disp[0]['outcome'] == 'interested') interestedCount++;
+          } else if (disp is Map && disp['outcome'] == 'interested') {
+            interestedCount++;
+          }
+        }
+      }
+
+      final followUpsRes = await _supabase
+          .from('follow_ups')
+          .select('id')
+          .eq('assigned_to', callerId)
+          .eq('status', 'open')
+          .lte(
+            'due_at',
+            DateTime(now.year, now.month, now.day, 23, 59, 59)
+                .toUtc()
+                .toIso8601String(),
+          );
+
+      final followUpsCount = (followUpsRes as List<dynamic>).length;
+
+      return StatsModel(
+        totalCallsToday: totalCalls,
+        connectedCallsToday: connectedCalls,
+        interestedToday: interestedCount,
+        pendingCallbacksToday: followUpsCount,
+      );
+    } catch (_) {
+      return StatsModel();
+    }
+  }
+}

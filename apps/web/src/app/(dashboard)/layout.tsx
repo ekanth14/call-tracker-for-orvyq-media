@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   BarChart3,
   ShieldAlert,
+  MessageSquare,
 } from "lucide-react";
 
 export default async function DashboardLayout({
@@ -107,6 +108,14 @@ export default async function DashboardLayout({
           >
             <ShieldAlert className="h-4 w-4 text-rose-400" />
             Audit Flags
+          </Link>
+
+          <Link
+            href="/chat"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition"
+          >
+            <MessageSquare className="h-4 w-4 text-teal-400" />
+            Team Chat
           </Link>
         </nav>
 

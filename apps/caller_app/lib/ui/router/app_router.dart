@@ -7,6 +7,8 @@ import '../views/calling/calling_active_screen.dart';
 import '../views/calling/post_call_dialog_screen.dart';
 import '../views/health/health_check_screen.dart';
 import '../views/queue/lead_queue_screen.dart';
+import '../views/chat/chat_screen.dart';
+import '../views/profile/profile_screen.dart';
 
 class AppRouter {
   final AuthViewModel authViewModel;
@@ -62,6 +64,14 @@ class AppRouter {
       GoRoute(
         path: '/health',
         builder: (context, state) => const HealthCheckScreen(),
+      ),
+      GoRoute(
+        path: '/chat',
+        builder: (context, state) => const ChatScreen(),
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileScreen(),
       ),
     ],
   );

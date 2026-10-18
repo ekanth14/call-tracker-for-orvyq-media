@@ -6,6 +6,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/phone_formatter.dart';
 import '../../view_models/calling_view_model.dart';
+import 'widgets/pitch_cheat_sheet.dart';
 
 class CallingActiveScreen extends StatefulWidget {
   const CallingActiveScreen({super.key});
@@ -177,6 +178,29 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
                         ),
                       ],
                     ),
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                // Corporate In-App Sales Pitch & Objections Cheat-Sheet
+                Center(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.psychology_outlined, size: 18),
+                    label: const Text('Sales Pitch & Objections Cheat-Sheet'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.primary),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    onPressed: () {
+                      PitchCheatSheet.show(
+                        context,
+                        leadName: callingVm.activeLead?.name ?? '',
+                        company: callingVm.activeLead?.company,
+                      );
+                    },
                   ),
                 ),
 

@@ -7,6 +7,7 @@ import '../../view_models/calling_view_model.dart';
 import '../../view_models/queue_view_model.dart';
 import '../../view_models/stats_view_model.dart';
 import 'widgets/call_lock_banner.dart';
+import 'widgets/daily_quota_card.dart';
 import 'widgets/lead_card.dart';
 import 'widgets/stats_header.dart';
 
@@ -109,17 +110,19 @@ class _LeadQueueScreenState extends State<LeadQueueScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Team Community Chat',
+            icon: const Icon(Icons.forum_outlined),
+            onPressed: () => context.push('/chat'),
+          ),
+          IconButton(
+            tooltip: 'My Profile',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: () => context.push('/profile'),
+          ),
+          IconButton(
             tooltip: 'System Health Check',
             icon: const Icon(Icons.health_and_safety_outlined),
             onPressed: () => context.push('/health'),
-          ),
-          IconButton(
-            tooltip: 'Sign Out',
-            icon: const Icon(Icons.logout_rounded),
-            onPressed: () async {
-              await authVm.signOut();
-              if (mounted) context.go('/login');
-            },
           ),
         ],
       ),
@@ -141,6 +144,10 @@ class _LeadQueueScreenState extends State<LeadQueueScreen> {
               stats: statsVm.stats,
               onRefresh: () => statsVm.loadTodayStats(),
             ),
+            const SizedBox(height: 12),
+
+            // Mandatory 2-Hour Daily Work Quota Card (Interpretation A)
+            const DailyQuotaCard(),
             const SizedBox(height: 16),
 
             // Search Bar

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/phone_formatter.dart';
+import '../../../../core/utils/whatsapp_helper.dart';
 import '../../../../data/models/lead_model.dart';
 
 class LeadCard extends StatelessWidget {
@@ -193,21 +194,45 @@ class LeadCard extends StatelessWidget {
                 ],
               ),
 
-              // Big Call Button
-              ElevatedButton.icon(
-                onPressed: isCallLocked ? null : onCall,
-                icon: const Icon(Icons.phone_rounded, size: 18),
-                label: const Text('Call Now'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.success,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: AppTheme.border,
-                  minimumSize: const Size(120, 40),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // One-Tap WhatsApp Follow-Up
+                  IconButton(
+                    tooltip: 'Send WhatsApp Follow-Up',
+                    icon: const Icon(Icons.chat_bubble_outline, color: Color(0xFF25D366), size: 19),
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.1),
+                      padding: const EdgeInsets.all(10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () {
+                      WhatsAppHelper.openFollowUpChat(
+                        phoneE164: lead.phoneE164,
+                        leadName: lead.name,
+                        callerName: 'Orvyq Media',
+                      );
+                    },
                   ),
-                ),
+                  const SizedBox(width: 8),
+
+                  // Big Call Button
+                  ElevatedButton.icon(
+                    onPressed: isCallLocked ? null : onCall,
+                    icon: const Icon(Icons.phone_rounded, size: 18),
+                    label: const Text('Call Now'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.success,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: AppTheme.border,
+                      minimumSize: const Size(110, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

@@ -26,6 +26,8 @@ interface CallerItem {
   created_at: string;
   assigned_count?: number;
   completed_count?: number;
+  today_active_seconds?: number;
+  today_quota_met?: boolean;
 }
 
 export default function CallersPage() {
@@ -60,18 +62,78 @@ export default function CallersPage() {
       return;
     }
 
-    // Fetch counts for assigned leads and completed calls
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Fetch counts and daily quota tracking for each caller
     const enhanced = await Promise.all(
       (profiles || []).map(async (c) => {
-        const [{ count: assignedCount }, { count: callCount }] = await Promise.all([
-          supabase.from("leads").select("*", { count: "exact", head: true }).eq("assigned_to", c.id),
-          supabase.from("calls").select("*", { count: "exact", head: true }).eq("caller_id", c.id),
-        ]);
-        return {
-          ...c,
-          assigned_count: assignedCount || 0,
-          completed_count: callCount || 0,
-        };
+        try {
+          const [
+            { count: assignedCount },
+            { count: callCount },
+            { data: todayCalls },
+            { data: todaySessions },
+          ] = await Promise.all([
+            supabase
+              .from("leads")
+              .select("*", { count: "exact", head: true })
+              .eq("assigned_to", c.id),
+            supabase
+              .from("calls")
+              .select("*", { count: "exact", head: true })
+              .eq("caller_id", c.id),
+            supabase
+              .from("calls")
+              .select("actual_duration_seconds")
+              .eq("caller_id", c.id)
+              .gte("started_at", todayStart.toISOString()),
+            supabase
+              .from("caller_work_sessions")
+              .select("duration_seconds, started_at, is_active")
+              .eq("caller_id", c.id)
+              .gte("started_at", todayStart.toISOString()),
+          ]);
+
+          const talkSeconds = (todayCalls || []).reduce(
+            (acc, curr) => acc + (curr.actual_duration_seconds || 0),
+            0
+          );
+
+          let sessionSeconds = (todaySessions || []).reduce(
+            (acc, curr) => acc + (curr.duration_seconds || 0),
+            0
+          );
+
+          // Add live active session duration if caller is currently clocked in
+          const liveSession = (todaySessions || []).find((s) => s.is_active);
+          if (liveSession) {
+            const elapsed = Math.max(
+              0,
+              Math.floor((Date.now() - new Date(liveSession.started_at).getTime()) / 1000)
+            );
+            sessionSeconds += elapsed;
+          }
+
+          const totalSeconds = Math.max(talkSeconds, sessionSeconds);
+          const quotaMet = totalSeconds >= 7200; // 2 Hours = 7200s
+
+          return {
+            ...c,
+            assigned_count: assignedCount || 0,
+            completed_count: callCount || 0,
+            today_active_seconds: totalSeconds,
+            today_quota_met: quotaMet,
+          };
+        } catch {
+          return {
+            ...c,
+            assigned_count: 0,
+            completed_count: 0,
+            today_active_seconds: 0,
+            today_quota_met: false,
+          };
+        }
       })
     );
 
@@ -223,6 +285,7 @@ export default function CallersPage() {
                   <th className="py-3.5 px-6">Mobile SIM</th>
                   <th className="py-3.5 px-6 text-center">Assigned Leads</th>
                   <th className="py-3.5 px-6 text-center">Verified Calls</th>
+                  <th className="py-3.5 px-6">Daily 2h Quota</th>
                   <th className="py-3.5 px-6">Status</th>
                   <th className="py-3.5 px-6 text-right">Actions</th>
                 </tr>
@@ -256,6 +319,44 @@ export default function CallersPage() {
                       <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
                         {caller.completed_count ?? 0}
                       </span>
+                    </td>
+                    <td className="py-4 px-6 min-w-[170px]">
+                      {(() => {
+                        const totalSecs = caller.today_active_seconds || 0;
+                        const hours = Math.floor(totalSecs / 3600);
+                        const minutes = Math.floor((totalSecs % 3600) / 60);
+                        const pct = Math.min(100, Math.round((totalSecs / 7200) * 100));
+                        const isMet = caller.today_quota_met;
+
+                        return (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-medium text-slate-700">
+                                {hours > 0 ? `${hours}h ` : ""}{minutes}m / 2h
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                  isMet
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : totalSecs > 0
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-slate-100 text-slate-500"
+                                }`}
+                              >
+                                {isMet ? "Quota Met 🎉" : `${pct}%`}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  isMet ? "bg-emerald-500" : "bg-amber-500"
+                                }`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="py-4 px-6">
                       {caller.is_active ? (

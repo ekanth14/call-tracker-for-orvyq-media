@@ -13,6 +13,7 @@ import {
   BarChart3,
   ShieldAlert,
   MessageSquare,
+  Smartphone,
 } from "lucide-react";
 
 export default async function DashboardLayout({
@@ -37,8 +38,8 @@ export default async function DashboardLayout({
     .single();
 
   if (profile?.role !== "owner") {
-    // If signed in user is not an owner, deny access
-    redirect("/login?error=unauthorized");
+    // If signed in user is a caller, route them directly to the caller web app
+    redirect("/caller");
   }
 
   return (
@@ -117,6 +118,19 @@ export default async function DashboardLayout({
             <MessageSquare className="h-4 w-4 text-teal-400" />
             Team Chat
           </Link>
+
+          <div className="pt-3 border-t border-slate-800/60 my-2">
+            <div className="px-3 pb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              Mobile & iOS Web App
+            </div>
+            <Link
+              href="/caller"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-indigo-300 hover:text-white hover:bg-indigo-600/20 border border-indigo-500/20 transition group"
+            >
+              <Smartphone className="h-4 w-4 text-indigo-400 group-hover:scale-110 transition" />
+              <span>Caller App (iOS)</span>
+            </Link>
+          </div>
         </nav>
 
         {/* User Footer */}

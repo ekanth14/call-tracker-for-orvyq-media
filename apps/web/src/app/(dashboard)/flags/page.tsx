@@ -147,6 +147,8 @@ export default function FlagsPage() {
     switch (ruleCode) {
       case "CLAIM_MISMATCH":
         return "Caller marked call as connected, but device call log talk time was below the 10-second threshold.";
+      case "MANUAL_UNVERIFIED_ENTRY":
+        return "No SIM call log matched; duration was self-reported by caller and requires manual review.";
       case "NO_LOG_ENTRY":
         return "Post-call dialog submitted with no matching outgoing phone call detected in the SIM call log.";
       case "SHORT_INTERESTED":

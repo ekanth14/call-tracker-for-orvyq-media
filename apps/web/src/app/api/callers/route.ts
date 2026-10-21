@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { normalizePhoneE164 } from "@/lib/phone";
 
 export async function POST(req: NextRequest) {
   try {
@@ -101,8 +102,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       user: {
-        id: authUser.user.id,
-        email: authUser.user.email,
+        id: userId,
+        email,
         full_name,
       },
     });
@@ -133,23 +134,58 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden: Owner only" }, { status: 403 });
     }
 
-    const { caller_id, is_active } = await req.json();
+    const body = await req.json();
+    const { caller_id, full_name, mobile_e164, role, is_active } = body;
 
-    if (!caller_id || typeof is_active !== "boolean") {
-      return NextResponse.json({ error: "Invalid parameters" }, { status: 400 });
+    if (!caller_id) {
+      return NextResponse.json({ error: "caller_id is required" }, { status: 400 });
+    }
+
+    const updates: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (typeof is_active === "boolean") {
+      updates.is_active = is_active;
+    }
+
+    if (typeof full_name === "string" && full_name.trim()) {
+      updates.full_name = full_name.trim();
+    }
+
+    if (typeof mobile_e164 === "string") {
+      const trimmed = mobile_e164.trim();
+      if (trimmed) {
+        const norm = normalizePhoneE164(trimmed);
+        if (!norm.success || !norm.e164) {
+          return NextResponse.json(
+            { error: "Invalid mobile number format. Enter a valid 10-digit Indian phone number." },
+            { status: 400 }
+          );
+        }
+        updates.mobile_e164 = norm.e164;
+      } else {
+        updates.mobile_e164 = null;
+      }
+    }
+
+    if (role === "caller" || role === "owner") {
+      updates.role = role;
     }
 
     const admin = createAdminClient();
-    const { error } = await admin
+    const { data: updated, error } = await admin
       .from("profiles")
-      .update({ is_active, updated_at: new Date().toISOString() })
-      .eq("id", caller_id);
+      .update(updates)
+      .eq("id", caller_id)
+      .select()
+      .single();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, is_active });
+    return NextResponse.json({ success: true, user: updated });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal Server Error";
     return NextResponse.json({ error: message }, { status: 500 });

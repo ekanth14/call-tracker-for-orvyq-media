@@ -23,6 +23,7 @@ import {
   Split,
   ChevronDown,
   RefreshCw,
+  Pencil,
 } from "lucide-react";
 
 interface Caller {
@@ -36,12 +37,14 @@ interface LeadRow {
   phone_e164: string;
   name: string | null;
   company: string | null;
+  city?: string | null;
   notes: string | null;
   status: string;
   assigned_to: string | null;
   assigned_at: string | null;
   attempt_count: number;
   last_call_at: string | null;
+  next_follow_up_at?: string | null;
   created_at: string;
 }
 
@@ -61,6 +64,21 @@ export default function LeadsPage() {
   // Modals
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
+
+  // Edit Lead State
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingLead, setEditingLead] = useState<LeadRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editCompany, setEditCompany] = useState("");
+  const [editCity, setEditCity] = useState("");
+  const [editStatus, setEditStatus] = useState("assigned");
+  const [editAssignedTo, setEditAssignedTo] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editFollowUp, setEditFollowUp] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSuccess, setEditSuccess] = useState(false);
 
   // Import State
   const [importTab, setImportTab] = useState<"csv" | "paste">("csv");
@@ -316,6 +334,74 @@ export default function LeadsPage() {
     }
   };
 
+  const startEditingLead = (lead: LeadRow) => {
+    setEditingLead(lead);
+    setEditName(lead.name || "");
+    setEditPhone(lead.phone_e164);
+    setEditCompany(lead.company || "");
+    setEditCity(lead.city || "");
+    setEditStatus(lead.status || "assigned");
+    setEditAssignedTo(lead.assigned_to || "");
+    setEditNotes(lead.notes || "");
+    setEditFollowUp(
+      lead.next_follow_up_at
+        ? new Date(lead.next_follow_up_at).toISOString().slice(0, 16)
+        : ""
+    );
+    setEditError(null);
+    setEditSuccess(false);
+    setEditModalOpen(true);
+  };
+
+  const handleUpdateLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLead) return;
+    setEditLoading(true);
+    setEditError(null);
+
+    const norm = normalizePhoneE164(editPhone.trim());
+    if (!norm) {
+      setEditError("Invalid phone number format. Please provide a valid 10-digit mobile number.");
+      setEditLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_id: editingLead.id,
+          name: editName.trim(),
+          phone_e164: norm,
+          company: editCompany.trim() || null,
+          city: editCity.trim() || null,
+          status: editStatus,
+          assigned_to: editAssignedTo || null,
+          notes: editNotes.trim() || null,
+          next_follow_up_at: editFollowUp ? new Date(editFollowUp).toISOString() : null,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update lead.");
+      }
+
+      setEditSuccess(true);
+      setTimeout(() => {
+        setEditModalOpen(false);
+        setEditSuccess(false);
+        setEditingLead(null);
+        fetchLeadsAndCallers();
+      }, 700);
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : "Error updating lead");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
@@ -481,6 +567,7 @@ export default function LeadsPage() {
                   <th className="py-3.5 px-6">Status</th>
                   <th className="py-3.5 px-6">Assigned Caller</th>
                   <th className="py-3.5 px-6 text-center">Attempts</th>
+                  <th className="py-3.5 px-6 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -558,6 +645,16 @@ export default function LeadsPage() {
                         <span className="font-mono text-xs text-slate-500">
                           {lead.attempt_count}
                         </span>
+                      </td>
+                      <td className="py-4 px-6 text-right">
+                        <button
+                          onClick={() => startEditingLead(lead)}
+                          className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition shadow-sm"
+                          title="Modify Lead Information"
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-indigo-600" />
+                          Edit
+                        </button>
                       </td>
                     </tr>
                   );
@@ -910,6 +1007,186 @@ export default function LeadsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Lead Modal */}
+      {editModalOpen && editingLead && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                  <Pencil className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Modify Lead Details</h3>
+                  <p className="text-xs text-slate-500">Edit contact details, status, and assigned employee</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateLead} className="p-6 space-y-4 overflow-y-auto flex-1">
+              {editError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+                  {editError}
+                </div>
+              )}
+
+              {editSuccess && (
+                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Lead details updated successfully!
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Contact Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Phone Number (E.164) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="e.g. +919876543210"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Company
+                  </label>
+                  <input
+                    type="text"
+                    value={editCompany}
+                    onChange={(e) => setEditCompany(e.target.value)}
+                    placeholder="e.g. Acme Corp"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    City / Location
+                  </label>
+                  <input
+                    type="text"
+                    value={editCity}
+                    onChange={(e) => setEditCity(e.target.value)}
+                    placeholder="e.g. Mumbai, Bengaluru"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Lead Status
+                  </label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <option value="new">New (Unassigned)</option>
+                    <option value="assigned">Assigned</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="interested">Interested (Lead Won)</option>
+                    <option value="not_interested">Not Interested</option>
+                    <option value="callback">Callback Scheduled</option>
+                    <option value="do_not_call">Do Not Call (DNC)</option>
+                    <option value="unreachable">Unreachable</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Assigned Caller
+                  </label>
+                  <select
+                    value={editAssignedTo}
+                    onChange={(e) => setEditAssignedTo(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {callers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.full_name} {!c.is_active ? "(Inactive)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Next Follow-Up Due Date/Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={editFollowUp}
+                  onChange={(e) => setEditFollowUp(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Notes / History
+                </label>
+                <textarea
+                  rows={3}
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Add any specific context or follow-up notes for the caller..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editLoading}
+                  className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {editLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

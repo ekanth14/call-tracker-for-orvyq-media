@@ -279,14 +279,14 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
               <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase">
-                <span>Verified Connection Rate</span>
+                <span>Duration Threshold Met (≥10s)</span>
                 <TrendingUp className="h-4 w-4 text-emerald-500" />
               </div>
               <div className="mt-3 text-3xl font-extrabold text-emerald-600">
                 {overallConnectionRate}%
               </div>
               <div className="text-xs text-slate-400 mt-1">
-                {connectedCalls} of {totalCalls} calls lasted ≥10s
+                {connectedCalls} of {totalCalls} calls met the ≥10s duration threshold
               </div>
             </div>
 
@@ -299,7 +299,7 @@ export default function ReportsPage() {
                 {formatSecsToHours(totalTalkSecs)}
               </div>
               <div className="text-xs text-slate-400 mt-1">
-                Verified across all personal SIMs
+                Total talk time recorded across team
               </div>
             </div>
 

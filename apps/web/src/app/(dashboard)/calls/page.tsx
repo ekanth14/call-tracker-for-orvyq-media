@@ -367,16 +367,29 @@ export default function CallsPage() {
                         )}
                       </td>
                       <td className="py-4 px-6 font-mono text-xs text-slate-700">
-                        {formatDuration(call.talk_secs)}
+                        <div>{formatDuration(call.talk_secs)}</div>
+                        {call.source === "device_log" ? (
+                          <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-1">
+                            <Smartphone className="h-3 w-3" /> Hardware Verified (SIM Log)
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-1">
+                            <AlertTriangle className="h-3 w-3" /> Unverified / Manual
+                          </div>
+                        )}
                       </td>
                       <td className="py-4 px-6">
-                        {disp?.connected ? (
+                        {call.source === "manual" ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                            <AlertTriangle className="h-3 w-3" /> Unverified Manual Entry
+                          </span>
+                        ) : disp?.connected ? (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                            <CheckCircle2 className="h-3 w-3" /> Connected (≥10s)
+                            <CheckCircle2 className="h-3 w-3" /> Duration ≥10s (Threshold Met)
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                            <XCircle className="h-3 w-3" /> Not Connected (&lt;10s)
+                            <XCircle className="h-3 w-3" /> Under 10s Minimum
                           </span>
                         )}
                       </td>

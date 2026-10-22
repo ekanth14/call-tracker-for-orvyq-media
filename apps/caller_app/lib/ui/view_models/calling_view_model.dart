@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../core/config/app_config.dart';
 import '../../data/models/device_call_log_model.dart';
@@ -43,6 +44,14 @@ class CallingViewModel extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
 
+  // Work Session & Duty Status (§1 & §2)
+  bool _isClockedIn = false;
+  String? _currentSessionId;
+  int _activeWorkSeconds = 0;
+  int _quotaTargetSeconds = 7200; // 2 Hours = 7200s
+  bool _isWorkStatusLoading = false;
+  Timer? _liveWorkTicker;
+
   // Call-Log Detection State (§5.3 & §6)
   DeviceCallLogModel? _matchedCallLog;
   bool _isDetectingCallLog = false;
@@ -66,6 +75,14 @@ class CallingViewModel extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
+  // Work Session Getters
+  bool get isClockedIn => _isClockedIn;
+  String? get currentSessionId => _currentSessionId;
+  int get activeWorkSeconds => _activeWorkSeconds;
+  int get quotaTargetSeconds => _quotaTargetSeconds;
+  bool get isQuotaMet => _activeWorkSeconds >= _quotaTargetSeconds;
+  bool get isWorkStatusLoading => _isWorkStatusLoading;
+
   DeviceCallLogModel? get matchedCallLog => _matchedCallLog;
   bool get isDetectingCallLog => _isDetectingCallLog;
   bool get detectionTimedOut => _detectionTimedOut;
@@ -83,6 +100,124 @@ class CallingViewModel extends ChangeNotifier {
   /// True if duration >= minConnectedDurationSecs (10s)
   bool get isConnected =>
       _callDurationSecs >= AppConfig.minConnectedDurationSecs;
+
+  @override
+  void dispose() {
+    _liveWorkTicker?.cancel();
+    super.dispose();
+  }
+
+  void _startWorkTicker() {
+    _liveWorkTicker?.cancel();
+    _liveWorkTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_isClockedIn) {
+        _activeWorkSeconds += 1;
+        notifyListeners();
+      }
+    });
+  }
+
+  /// Authoritatively fetches the caller's live work status and quota from database.
+  Future<void> fetchWorkStatus() async {
+    _isWorkStatusLoading = true;
+    notifyListeners();
+
+    try {
+      final status = await _callingRepository.getCallerWorkStatus();
+      _isClockedIn = status['is_clocked_in'] == true;
+      _currentSessionId = status['current_session_id'] as String?;
+      _activeWorkSeconds = (status['active_seconds_today'] as num?)?.toInt() ?? 0;
+      _quotaTargetSeconds = (status['quota_target_seconds'] as num?)?.toInt() ?? 7200;
+
+      if (_isClockedIn) {
+        _startWorkTicker();
+      } else {
+        _liveWorkTicker?.cancel();
+      }
+    } catch (_) {
+      // Keep previous state if network error
+    } finally {
+      _isWorkStatusLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Clocks into active work shift, allowing lead calling and daily quota logging.
+  Future<bool> clockIn() async {
+    _isWorkStatusLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final res = await _callingRepository.clockIn();
+      _isClockedIn = true;
+      _currentSessionId = res['session_id'] as String?;
+      _startWorkTicker();
+      notifyListeners();
+
+      // Refresh background stats without wiping out active clocked-in state
+      try {
+        final status = await _callingRepository.getCallerWorkStatus();
+        if (status['is_clocked_in'] == true) {
+          _isClockedIn = true;
+          _currentSessionId = status['current_session_id'] as String?;
+        }
+        _activeWorkSeconds = (status['active_seconds_today'] as num?)?.toInt() ?? _activeWorkSeconds;
+        _quotaTargetSeconds = (status['quota_target_seconds'] as num?)?.toInt() ?? 7200;
+      } catch (_) {}
+
+      _isWorkStatusLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Failed to clock in: ${e.toString().replaceAll('Exception:', '').trim()}';
+      _isWorkStatusLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Clocks out of active work shift, pausing call tracking and ensuring off-duty privacy.
+  Future<bool> clockOut() async {
+    _isWorkStatusLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await _callingRepository.clockOut(sessionId: _currentSessionId);
+      _isClockedIn = false;
+      _currentSessionId = null;
+      _liveWorkTicker?.cancel();
+      notifyListeners();
+
+      // Refresh background stats
+      try {
+        final status = await _callingRepository.getCallerWorkStatus();
+        _isClockedIn = status['is_clocked_in'] == true;
+        _currentSessionId = status['current_session_id'] as String?;
+        _activeWorkSeconds = (status['active_seconds_today'] as num?)?.toInt() ?? _activeWorkSeconds;
+        _quotaTargetSeconds = (status['quota_target_seconds'] as num?)?.toInt() ?? 7200;
+      } catch (_) {}
+
+      _isWorkStatusLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Failed to clock out: ${e.toString().replaceAll('Exception:', '').trim()}';
+      _isWorkStatusLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Test isolation helper to set clocked-in state
+  @visibleForTesting
+  void setClockedInForTesting(bool clockedIn, {String? sessionId, int activeSeconds = 0}) {
+    _isClockedIn = clockedIn;
+    _currentSessionId = sessionId;
+    _activeWorkSeconds = activeSeconds;
+    notifyListeners();
+  }
 
   /// Check active call lock on app start or resume
   Future<void> checkCallLock() async {
@@ -111,6 +246,13 @@ class CallingViewModel extends ChangeNotifier {
 
   /// Initiates a call to an assigned lead, enforcing Call Lock & launching phone dialer
   Future<bool> initiateCall(LeadModel lead) async {
+    if (!_isClockedIn) {
+      _errorMessage =
+          'Work Login Required: You are currently off duty. Please clock in before initiating calls to leads.';
+      notifyListeners();
+      return false;
+    }
+
     if (_isCallLocked) {
       _errorMessage =
           'Call Locked: You must complete notes for your previous call before placing a new one.';
@@ -173,8 +315,9 @@ class CallingViewModel extends ChangeNotifier {
 
   /// Reads native Android CallLog to detect and match the newest outgoing call (§5.3)
   /// Polls asynchronously to accommodate slow OEM log writing.
+  /// Strictly requires active work shift; if off-duty, bypasses call log completely.
   Future<bool> detectCallLog({Duration timeout = const Duration(seconds: 15)}) async {
-    if (_activeLead == null || _activeAttempt == null) return false;
+    if (!_isClockedIn || _activeLead == null || _activeAttempt == null) return false;
 
     _isDetectingCallLog = true;
     _detectionTimedOut = false;
@@ -185,6 +328,7 @@ class CallingViewModel extends ChangeNotifier {
       final matched = await _callLogService.matchOutgoingCallForLead(
         leadPhoneE164: _activeLead!.phoneE164,
         dialedAfter: _activeAttempt!.dialedAt,
+        isClockedIn: _isClockedIn,
         timeout: timeout,
         onProgress: (remaining) {
           _detectionSecondsRemaining = remaining;
@@ -268,6 +412,18 @@ class CallingViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Cancels or discards active dial attempt locally, unlocking the queue.
+  void cancelOrDiscardAttempt() {
+    _isCallLocked = false;
+    _activeAttempt = null;
+    _activeLead = null;
+    _matchedCallLog = null;
+    _isDetectingCallLog = false;
+    _isLoading = false;
+    _errorMessage = null;
+    notifyListeners();
+  }
+
   /// Submits the mandatory post-call dialog and unlocks the queue
   /// If offline or network fails, queues to WorkManager for background sync (§5.2)
   Future<bool> submitDialog() async {
@@ -311,6 +467,7 @@ class CallingViewModel extends ChangeNotifier {
     final callStartedAt =
         _matchedCallLog?.startedAt ?? _activeAttempt!.dialedAt;
     final simSlot = _matchedCallLog?.simSlot;
+    final evidenceSource = _matchedCallLog != null ? 'device_log' : 'manual';
 
     try {
       await _callingRepository.submitCallDialog(
@@ -327,6 +484,7 @@ class CallingViewModel extends ChangeNotifier {
         note: _notes.trim().isNotEmpty ? _notes.trim() : null,
         followUpDueAt: _followUpDateTime,
         followUpType: _followUpDateTime != null ? _followUpType : null,
+        evidenceSource: evidenceSource,
       );
 
       // Release Call Lock
@@ -341,6 +499,7 @@ class CallingViewModel extends ChangeNotifier {
       // Offline fallback: Queue for WorkManager background sync (§5.2)
       final payload = {
         'p_dial_attempt_id': _activeAttempt!.id,
+        'p_device_id': _callingRepository.deviceId,
         'p_number_e164': _activeLead!.phoneE164,
         'p_call_type': 'outgoing',
         'p_started_at': callStartedAt.toUtc().toIso8601String(),
@@ -355,6 +514,7 @@ class CallingViewModel extends ChangeNotifier {
         'p_seconds_after_call_end': 0,
         'p_follow_up_due_at': _followUpDateTime?.toUtc().toIso8601String(),
         'p_follow_up_type': _followUpDateTime != null ? _followUpType : null,
+        'p_evidence_source': evidenceSource,
       };
 
       await BackgroundSyncService.enqueuePendingSync(payload);

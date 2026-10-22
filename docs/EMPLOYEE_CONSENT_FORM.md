@@ -11,21 +11,25 @@ Orvyqmedia utilizes a native Android application ("Orvyqmedia Caller") to verify
 
 ---
 
-## 2. Guaranteed Privacy Safeguards (Section 6 Compliance)
+## 2. Guaranteed Privacy Safeguards & Data Lifecycle
 
 Orvyqmedia explicitly warrants and agrees to the following technical and operational privacy protections:
 
-1. **On-Device Filtering Exclusivity:**
-   - The application only inspects and uploads outgoing call logs whose dialed telephone number matches a lead currently assigned to the employee within the Orvyqmedia database.
-2. **Absolute Privacy of Personal Data:**
-   - Personal incoming calls, personal outgoing calls, contacts, SMS messages, WhatsApp communications, photos, and browser history are **NEVER accessed, read, filtered, or transmitted**.
+1. **On-Device Memory Filtering:**
+   - To match an outbound work call to an assigned lead, Android architecture requires the application to query recent outgoing call log entries within the active dial window into volatile device memory.
+   - The application checks each entry's dialed number against the assigned lead's E.164 phone number.
+   - Any unrelated or personal call records queried into memory are immediately discarded on-device. They are **NEVER saved to persistent device storage, NEVER logged to disk, and NEVER transmitted or uploaded to Orvyqmedia servers**.
+2. **Absolute Non-Retention of Personal Data:**
+   - Personal incoming calls, personal outgoing calls, contacts, SMS messages, WhatsApp communications, photos, and browser history are strictly non-retained. The application requests only the minimum necessary telephony permissions for outgoing verification.
 3. **No Audio Recording:**
-   - The application contains zero voice recording code and does not record or store any call audio.
-4. **Data Verification Scope:**
-   - Only three data points are recorded per verified work call:
+   - The application contains zero voice recording code and does not record, intercept, or store any call audio.
+4. **Data Verification Scope (What is Uploaded):**
+   - Only work calls placed to assigned leads are recorded upon post-call dialog submission:
      1. Outgoing phone number (matching assigned lead).
      2. Call initiation timestamp.
-     3. Duration of the call in seconds (subject to the ≥10-second connected threshold).
+     3. Duration of the call in seconds (evaluated against the ≥10-second connected threshold).
+     4. SIM slot identifier (if reported by the Android OS).
+     5. Verification evidence source (`device_log` vs `manual`).
 
 ---
 

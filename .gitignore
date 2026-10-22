@@ -46,9 +46,13 @@ Thumbs.db
 
 # Flutter & Android
 **/android/.gradle/
+**/android/.kotlin/
 **/android/local.properties
 **/android/*.hprof
 **/.dart_tool/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
 **/apps/caller_app/build/
+*.apk
+*.aab
+

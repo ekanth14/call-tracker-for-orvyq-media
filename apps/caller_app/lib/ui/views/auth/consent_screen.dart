@@ -92,7 +92,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'What is Protected (On-Device Filtering)',
+                      'What is Protected (On-Device Filtering & Privacy)',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -102,14 +102,14 @@ class _ConsentScreenState extends State<ConsentScreen> {
                     const SizedBox(height: 12),
                     _buildRuleRow(
                       Icons.shield_outlined,
-                      'Work Calls Only',
-                      'Only outgoing calls to phone numbers currently assigned to you in Orvyqmedia are processed.',
+                      'Assigned Leads Matching Only',
+                      'Recent outgoing logs are queried on-device to match your assigned lead. Only matching work calls are retained and uploaded.',
                     ),
                     const SizedBox(height: 10),
                     _buildRuleRow(
                       Icons.phone_disabled_outlined,
-                      'Zero Personal Call Data',
-                      'Personal calls to family, friends, or other contacts are NEVER read, filtered, or uploaded.',
+                      'Zero Retention of Personal Calls',
+                      'Personal and unrelated calls scanned in temporary memory are immediately discarded on-device and are NEVER saved or uploaded.',
                     ),
                     const SizedBox(height: 10),
                     _buildRuleRow(
@@ -146,7 +146,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 title: const Text(
-                  'I understand that only outgoing calls made to my assigned leads will be verified.',
+                  'I understand that outgoing call logs are queried on-device to match calls made to my assigned leads.',
                   style: TextStyle(fontSize: 13, color: AppTheme.textMain),
                 ),
               ),
@@ -160,7 +160,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 title: const Text(
-                  'I consent to uploading the call timestamp and duration (minimum 10s connected) for assigned leads.',
+                  'I consent to uploading the call timestamp, duration (≥10s connected threshold), and verification source for assigned leads only.',
                   style: TextStyle(fontSize: 13, color: AppTheme.textMain),
                 ),
               ),
@@ -174,7 +174,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 title: const Text(
-                  'I understand that my personal calls, contacts, and messages are completely private and never read.',
+                  'I understand that personal calls, contacts, and messages are never stored on disk or uploaded to any server.',
                   style: TextStyle(fontSize: 13, color: AppTheme.textMain),
                 ),
               ),

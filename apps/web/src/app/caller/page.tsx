@@ -230,6 +230,29 @@ export default function CallerAppPage() {
         }
       }
 
+      // Check if there is an existing open dial attempt awaiting disposition
+      const { data: openAttempts } = await supabase
+        .from("dial_attempts")
+        .select("id, lead_id, dialed_at, lead:leads(id, name, phone_e164, company, city, status, attempt_count, last_call_at, notes, assigned_to, next_follow_up_at)")
+        .eq("caller_id", prof.id)
+        .eq("status", "open")
+        .order("dialed_at", { ascending: false })
+        .limit(1);
+
+      if (openAttempts && openAttempts.length > 0) {
+        const attempt = openAttempts[0] as any;
+        const leadData = Array.isArray(attempt.lead) ? attempt.lead[0] : attempt.lead;
+        if (leadData) {
+          setPostCallLead(leadData as Lead);
+          setPostCallAttemptId(attempt.id);
+          setPostCallDuration(30);
+          setCallerClaimedConnected(true);
+          setSelectedOutcome("interested");
+          setDispositionOpen(true);
+          setToastMessage("⚠️ Restored open dial attempt. Please complete disposition.");
+        }
+      }
+
       setLoading(false);
     }
 

@@ -96,6 +96,66 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
     }
   }
 
+  Future<void> _handleBackNavigation(BuildContext context) async {
+    final callingVm = context.read<CallingViewModel>();
+    if (callingVm.activeAttempt == null || callingVm.activeLead == null) {
+      callingVm.cancelOrDiscardAttempt();
+      if (context.mounted) {
+        context.go('/queue');
+      }
+      return;
+    }
+    _showCancelDialog(context);
+  }
+
+  Future<void> _showCancelDialog(BuildContext context) async {
+    final callingVm = context.read<CallingViewModel>();
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppTheme.warning),
+            SizedBox(width: 8),
+            Text('Exit Call Disposition?'),
+          ],
+        ),
+        content: const Text(
+          'Do you want to discard this dial attempt and return to the lead queue, or mark the call as not placed?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('stay'),
+            child: const Text('Stay Here'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('not_placed'),
+            child: const Text('Mark Not Placed'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            onPressed: () => Navigator.of(ctx).pop('discard'),
+            child: const Text('Discard & Exit'),
+          ),
+        ],
+      ),
+    );
+
+    if (!context.mounted) return;
+
+    if (action == 'discard') {
+      callingVm.cancelOrDiscardAttempt();
+      if (context.mounted) {
+        context.go('/queue');
+      }
+    } else if (action == 'not_placed') {
+      callingVm.setDurationSecs(0);
+      _durationController.text = '0';
+      callingVm.setOutcome(PostCallOutcome.notPlaced);
+      await _handleSubmit();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final callingVm = context.watch<CallingViewModel>();
@@ -103,12 +163,34 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
     final matchedLog = callingVm.matchedCallLog;
 
     return PopScope(
-      canPop: false, // Mandatory: Call Lock enforces completion (§5 & §8)
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBackNavigation(context);
+      },
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
           title: const Text('Mandatory Call Disposition'),
-          automaticallyImplyLeading: false, // Cannot dismiss
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Back to Lead Queue',
+            onPressed: () => _handleBackNavigation(context),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () => _showCancelDialog(context),
+              icon: const Icon(Icons.close, size: 16, color: AppTheme.danger),
+              label: const Text(
+                'Cancel Call',
+                style: TextStyle(
+                  color: AppTheme.danger,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
         ),
         body: SafeArea(
           child: SingleChildScrollView(
@@ -116,6 +198,38 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Fallback banner if opened without an active lead
+                if (lead == null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.amber.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'No active lead is selected. You can return to the queue to select a lead to call.',
+                            style: TextStyle(fontSize: 12, color: Colors.brown),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            callingVm.cancelOrDiscardAttempt();
+                            context.go('/queue');
+                          },
+                          child: const Text('Go to Queue'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+
                 // 1. Call-Log Verification Proof Badge (§5.4 & §7)
                 if (matchedLog != null) ...[
                   Container(
@@ -174,7 +288,7 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                ] else if (callingVm.detectionTimedOut) ...[
+                ] else ...[
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -187,11 +301,11 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.phone_missed_rounded,
+                            Icon(Icons.warning_amber_rounded,
                                 color: AppTheme.warning, size: 20),
                             SizedBox(width: 8),
                             Text(
-                              'No Matching Call Detected in Log',
+                              'Unverified / Manual Entry Flow',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
@@ -202,29 +316,59 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'If the call just ended, the phone may still be writing the log entry.',
+                          'No hardware SIM call log matched this lead. Any duration entered is self-reported, will NOT be marked as hardware-verified, and will be flagged for manager review.',
                           style: TextStyle(fontSize: 12, color: Color(0xFFB45309)),
                         ),
                         const SizedBox(height: 10),
                         Row(
                           children: [
                             OutlinedButton.icon(
-                              onPressed: () => callingVm.detectCallLog(),
+                              onPressed: callingVm.isClockedIn
+                                  ? () => callingVm.detectCallLog()
+                                  : null,
                               icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('Retry Detection',
-                                  style: TextStyle(fontSize: 12)),
+                              label: Text(
+                                callingVm.isClockedIn
+                                    ? 'Retry Detection'
+                                    : 'Clocked Out (No Log Access)',
+                                style: const TextStyle(fontSize: 12),
+                              ),
                               style: OutlinedButton.styleFrom(
                                 minimumSize: const Size(0, 36),
                                 foregroundColor: const Color(0xFF92400E),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            TextButton(
-                              onPressed: () {
+                            TextButton.icon(
+                              onPressed: () async {
                                 callingVm.setDurationSecs(0);
+                                _durationController.text = '0';
                                 callingVm.setOutcome(PostCallOutcome.notPlaced);
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Mark Call Not Placed?'),
+                                    content: const Text(
+                                      'Submit disposition as "Call Not Placed" with 0s duration and unlock the queue?',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(ctx).pop(false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => Navigator.of(ctx).pop(true),
+                                        child: const Text('Submit & Unlock'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirmed == true && mounted) {
+                                  await _handleSubmit();
+                                }
                               },
-                              child: const Text('Mark "Call Not Placed"',
+                              icon: const Icon(Icons.phone_missed, size: 14),
+                              label: const Text('Mark "Call Not Placed" & Submit',
                                   style: TextStyle(fontSize: 12)),
                             ),
                           ],
@@ -311,57 +455,87 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
                               color: AppTheme.textMain,
                             ),
                           ),
-                          _buildConnectionBadge(callingVm.isConnected),
+                          _buildConnectionBadge(callingVm.isConnected, matchedLog != null),
                         ],
                       ),
                       const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _durationController,
-                              keyboardType: TextInputType.number,
-                              readOnly: matchedLog != null, // Lock if verified from log
-                              decoration: InputDecoration(
-                                hintText: 'Duration in seconds',
-                                suffixText: 'secs',
-                                suffixIcon: matchedLog != null
-                                    ? const Icon(Icons.lock,
-                                        size: 16, color: AppTheme.textMuted)
-                                    : null,
-                              ),
-                              onChanged: (val) {
-                                final secs = int.tryParse(val) ?? 0;
-                                callingVm.setDurationSecs(secs);
-                              },
-                            ),
-                          ),
-                          if (matchedLog == null) ...[
-                            const SizedBox(width: 10),
-                            Wrap(
-                              spacing: 6,
-                              children: [0, 15, 30, 60].map((s) {
-                                return ActionChip(
-                                  label: Text('${s}s'),
-                                  onPressed: () {
-                                    _durationController.text = s.toString();
-                                    callingVm.setDurationSecs(s);
-                                  },
-                                );
-                              }).toList(),
-                            ),
-                          ],
-                        ],
+                      // Full-width TextField with clear prefix/suffix icons
+                      TextField(
+                        controller: _durationController,
+                        keyboardType: TextInputType.number,
+                        readOnly: matchedLog != null, // Lock if verified from log
+                        decoration: InputDecoration(
+                          hintText: 'Enter duration in seconds (e.g. 45)',
+                          suffixText: 'seconds',
+                          prefixIcon: const Icon(Icons.timer_outlined,
+                              size: 20, color: AppTheme.primary),
+                          suffixIcon: matchedLog != null
+                              ? const Tooltip(
+                                  message: 'Locked: verified from SIM call log',
+                                  child: Icon(Icons.lock,
+                                      size: 18, color: AppTheme.success),
+                                )
+                              : null,
+                        ),
+                        onChanged: (val) {
+                          final secs = int.tryParse(val) ?? 0;
+                          callingVm.setDurationSecs(secs);
+                        },
                       ),
-                      const SizedBox(height: 6),
+                      if (matchedLog == null) ...[
+                        const SizedBox(height: 10),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              const Text(
+                                'Quick Presets: ',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                              ...[0, 15, 30, 60, 120].map((s) {
+                                final isSelected =
+                                    callingVm.callDurationSecs == s;
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: ChoiceChip(
+                                    label: Text('${s}s'),
+                                    selected: isSelected,
+                                    selectedColor: AppTheme.primary,
+                                    labelStyle: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                      color: isSelected
+                                          ? Colors.white
+                                          : AppTheme.textMain,
+                                    ),
+                                    onSelected: (_) {
+                                      _durationController.text = s.toString();
+                                      callingVm.setDurationSecs(s);
+                                    },
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
                       Text(
-                        callingVm.isConnected
-                            ? '✅ Verified connected: Meets the ≥${AppConfig.minConnectedDurationSecs}s connected threshold.'
-                            : '⚠️ Under ${AppConfig.minConnectedDurationSecs}s minimum: System will record call as not connected.',
+                        matchedLog == null
+                            ? '⚠️ Unverified / Manual entry: Self-reported duration is not hardware-verified and is flagged for audit.'
+                            : callingVm.isConnected
+                                ? 'Duration Threshold Met (≥${AppConfig.minConnectedDurationSecs}s): Qualified for connection metrics.'
+                                : '⚠️ Under ${AppConfig.minConnectedDurationSecs}s minimum threshold: Call recorded as not connected.',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
-                          color: callingVm.isConnected
+                          color: (callingVm.isConnected && matchedLog != null)
                               ? AppTheme.success
                               : const Color(0xFFB45309),
                         ),
@@ -719,24 +893,29 @@ class _PostCallDialogScreenState extends State<PostCallDialogScreen> {
     );
   }
 
-  Widget _buildConnectionBadge(bool isConnected) {
+  Widget _buildConnectionBadge(bool isConnected, [bool isHardwareVerified = false]) {
+    final text = isHardwareVerified
+        ? (isConnected ? 'Hardware Verified (≥10s)' : 'Hardware Verified (<10s)')
+        : (isConnected ? 'Manual / Unverified (≥10s)' : 'Manual / Unverified (<10s)');
+    final color = isHardwareVerified
+        ? (isConnected ? AppTheme.success : AppTheme.warning)
+        : const Color(0xFFD97706);
+    final bgColor = isHardwareVerified
+        ? (isConnected ? AppTheme.successLight : AppTheme.warningLight)
+        : const Color(0xFFFEF3C7);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: isConnected ? AppTheme.successLight : AppTheme.warningLight,
+        color: bgColor,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: isConnected
-              ? AppTheme.success.withOpacity(0.3)
-              : AppTheme.warning.withOpacity(0.3),
-        ),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
-        isConnected ? 'Connected (≥10s)' : 'Not Connected (<10s)',
+        text,
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          color: isConnected ? AppTheme.success : const Color(0xFFB45309),
+          color: color,
         ),
       ),
     );

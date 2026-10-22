@@ -14,7 +14,10 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
   final _permissionService = PermissionService();
   PermissionStatusReport? _report;
   int _pendingSyncCount = 0;
+  int _failedSyncCount = 0;
+  List<SyncItem> _failedItems = [];
   bool _isLoading = true;
+  bool _isSyncing = false;
 
   @override
   void initState() {
@@ -26,12 +29,25 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
     setState(() => _isLoading = true);
     final report = await _permissionService.checkPermissions();
     final count = await BackgroundSyncService.getPendingSyncCount();
+    final failedCount = await BackgroundSyncService.getFailedSyncCount();
+    final failedItems = await BackgroundSyncService.getFailedSyncItems();
     if (mounted) {
       setState(() {
         _report = report;
         _pendingSyncCount = count;
+        _failedSyncCount = failedCount;
+        _failedItems = failedItems;
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _triggerManualSync() async {
+    setState(() => _isSyncing = true);
+    await BackgroundSyncService.processSyncQueue();
+    await _checkStatus();
+    if (mounted) {
+      setState(() => _isSyncing = false);
     }
   }
 
@@ -121,48 +137,161 @@ class _HealthCheckScreenState extends State<HealthCheckScreen> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.border),
+                      border: Border.all(
+                        color: _failedSyncCount > 0
+                            ? AppTheme.danger.withOpacity(0.4)
+                            : AppTheme.border,
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Background Sync (WorkManager)',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textMain,
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Background Sync & Offline Proofs',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textMain,
+                              ),
+                            ),
+                            if (_isSyncing)
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            else if (_pendingSyncCount > 0 || _failedSyncCount > 0)
+                              TextButton.icon(
+                                onPressed: _triggerManualSync,
+                                icon: const Icon(Icons.sync, size: 16),
+                                label: const Text('Sync Now', style: TextStyle(fontSize: 12)),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 10),
                         Row(
                           children: [
                             Icon(
-                              _pendingSyncCount == 0
-                                  ? Icons.cloud_done_rounded
-                                  : Icons.cloud_upload_outlined,
-                              color: _pendingSyncCount == 0
-                                  ? AppTheme.success
-                                  : AppTheme.warning,
+                              _failedSyncCount > 0
+                                  ? Icons.error_outline_rounded
+                                  : _pendingSyncCount == 0
+                                      ? Icons.cloud_done_rounded
+                                      : Icons.cloud_upload_outlined,
+                              color: _failedSyncCount > 0
+                                  ? AppTheme.danger
+                                  : _pendingSyncCount == 0
+                                      ? AppTheme.success
+                                      : AppTheme.warning,
                               size: 20,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                _pendingSyncCount == 0
-                                    ? 'All call proofs synchronized with server.'
-                                    : '$_pendingSyncCount offline call proof(s) pending sync.',
+                                _failedSyncCount > 0
+                                    ? '$_failedSyncCount offline item(s) failed sync.'
+                                    : _pendingSyncCount == 0
+                                        ? 'All call proofs synchronized with server.'
+                                        : '$_pendingSyncCount offline call proof(s) pending sync.',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
-                                  color: _pendingSyncCount == 0
-                                      ? AppTheme.textMain
-                                      : const Color(0xFF92400E),
+                                  color: _failedSyncCount > 0
+                                      ? AppTheme.danger
+                                      : _pendingSyncCount == 0
+                                          ? AppTheme.textMain
+                                          : const Color(0xFF92400E),
                                 ),
                               ),
                             ),
                           ],
                         ),
+                        if (_failedItems.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          const Divider(height: 1),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Failed Uploads (Visible For Audit):',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.danger,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          ..._failedItems.map((item) {
+                            final phone = item.payload['p_number_e164'] ?? 'Unknown';
+                            final duration = item.payload['p_duration_secs'] ?? 0;
+                            final err = item.lastError ?? 'Unknown submission error';
+                            return Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEF2F2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFFECACA)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        '$phone (${duration}s)',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.textMain,
+                                        ),
+                                      ),
+                                      Row(
+                                        children: [
+                                          TextButton(
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              minimumSize: const Size(40, 24),
+                                            ),
+                                            onPressed: () async {
+                                              await BackgroundSyncService.retryFailedItem(item.id);
+                                              _checkStatus();
+                                            },
+                                            child: const Text('Retry', style: TextStyle(fontSize: 11)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          TextButton(
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              minimumSize: const Size(40, 24),
+                                              foregroundColor: AppTheme.danger,
+                                            ),
+                                            onPressed: () async {
+                                              await BackgroundSyncService.removeSyncItem(item.id);
+                                              _checkStatus();
+                                            },
+                                            child: const Text('Dismiss', style: TextStyle(fontSize: 11)),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    err,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF991B1B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
                       ],
                     ),
                   ),

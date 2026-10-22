@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../view_models/calling_view_model.dart';
 
 class DailyQuotaCard extends StatefulWidget {
   const DailyQuotaCard({super.key});
@@ -11,94 +11,44 @@ class DailyQuotaCard extends StatefulWidget {
 }
 
 class _DailyQuotaCardState extends State<DailyQuotaCard> {
-  bool _isLoading = true;
-  bool _isClockedIn = false;
-  String? _currentSessionId;
-  int _activeSeconds = 0;
-  final int _targetSeconds = 7200; // 2 Hours = 7200s
-  Timer? _liveTicker;
-
   @override
   void initState() {
     super.initState();
-    _fetchDailyQuota();
-  }
-
-  @override
-  void dispose() {
-    _liveTicker?.cancel();
-    super.dispose();
-  }
-
-  void _startLiveTicker() {
-    _liveTicker?.cancel();
-    _liveTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _isClockedIn) {
-        setState(() {
-          _activeSeconds += 1;
-        });
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final callingVm = context.read<CallingViewModel>();
+      callingVm.fetchWorkStatus();
     });
   }
 
-  Future<void> _fetchDailyQuota() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final res = await supabase.rpc('get_daily_caller_quota', params: {
-        'p_caller_id': userId,
-      });
-
-      if (res != null && mounted) {
-        final data = res as Map<String, dynamic>;
-        setState(() {
-          _activeSeconds = (data['active_seconds'] as num?)?.toInt() ?? 0;
-          _isClockedIn = data['is_clocked_in'] == true;
-          _currentSessionId = data['current_session_id'] as String?;
-          _isLoading = false;
-        });
-
-        if (_isClockedIn) {
-          _startLiveTicker();
-        } else {
-          _liveTicker?.cancel();
-        }
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _toggleClockIn() async {
-    setState(() => _isLoading = true);
-    final supabase = Supabase.instance.client;
-
-    try {
-      if (_isClockedIn && _currentSessionId != null) {
-        // Clock Out
-        await supabase.rpc('clock_out', params: {
-          'p_session_id': _currentSessionId,
-        });
-      } else {
-        // Clock In
-        await supabase.rpc('clock_in');
-      }
-      await _fetchDailyQuota();
-    } catch (e) {
-      if (mounted) {
+  Future<void> _toggleClockIn(CallingViewModel callingVm) async {
+    if (callingVm.isClockedIn) {
+      final success = await callingVm.clockOut();
+      if (!success && mounted && callingVm.errorMessage != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Action failed: $e')),
+          SnackBar(
+            content: Text(callingVm.errorMessage!),
+            backgroundColor: AppTheme.danger,
+          ),
         );
-        setState(() => _isLoading = false);
+      }
+    } else {
+      final success = await callingVm.clockIn();
+      if (!success && mounted && callingVm.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(callingVm.errorMessage!),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    final callingVm = context.watch<CallingViewModel>();
+
+    if (callingVm.isWorkStatusLoading && callingVm.activeWorkSeconds == 0) {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -116,12 +66,14 @@ class _DailyQuotaCardState extends State<DailyQuotaCard> {
       );
     }
 
-    final totalActive = _activeSeconds;
-    final progressPct = (totalActive / _targetSeconds).clamp(0.0, 1.0);
-    final isQuotaMet = totalActive >= _targetSeconds;
+    final isClockedIn = callingVm.isClockedIn;
+    final totalActive = callingVm.activeWorkSeconds;
+    final targetSeconds = callingVm.quotaTargetSeconds > 0 ? callingVm.quotaTargetSeconds : 7200;
+    final progressPct = (totalActive / targetSeconds).clamp(0.0, 1.0);
+    final isQuotaMet = callingVm.isQuotaMet;
     final hours = totalActive ~/ 3600;
     final mins = (totalActive % 3600) ~/ 60;
-    final remainingSecs = (_targetSeconds - totalActive).clamp(0, _targetSeconds);
+    final remainingSecs = (targetSeconds - totalActive).clamp(0, targetSeconds);
     final remHours = remainingSecs ~/ 3600;
     final remMins = (remainingSecs % 3600) ~/ 60;
 
@@ -156,7 +108,7 @@ class _DailyQuotaCardState extends State<DailyQuotaCard> {
                     decoration: BoxDecoration(
                       color: isQuotaMet
                           ? Colors.green.shade100
-                          : _isClockedIn
+                          : isClockedIn
                               ? Colors.amber.shade100
                               : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(10),
@@ -166,7 +118,7 @@ class _DailyQuotaCardState extends State<DailyQuotaCard> {
                       size: 18,
                       color: isQuotaMet
                           ? Colors.green.shade700
-                          : _isClockedIn
+                          : isClockedIn
                               ? Colors.amber.shade800
                               : Colors.grey.shade600,
                     ),
@@ -186,17 +138,17 @@ class _DailyQuotaCardState extends State<DailyQuotaCard> {
                       Text(
                         isQuotaMet
                             ? 'Mandatory 2h Completed! 🎉'
-                            : _isClockedIn
+                            : isClockedIn
                                 ? 'Shift Active • Live Ticking'
                                 : 'Clock in to log active work',
                         style: TextStyle(
                           fontSize: 11,
                           color: isQuotaMet
                               ? Colors.green.shade700
-                              : _isClockedIn
+                              : isClockedIn
                                   ? Colors.amber.shade900
                                   : AppTheme.textMuted,
-                          fontWeight: isQuotaMet || _isClockedIn
+                          fontWeight: isQuotaMet || isClockedIn
                               ? FontWeight.w600
                               : FontWeight.normal,
                         ),
@@ -208,17 +160,17 @@ class _DailyQuotaCardState extends State<DailyQuotaCard> {
 
               // Clock-In / Out Button
               InkWell(
-                onTap: _toggleClockIn,
+                onTap: () => _toggleClockIn(callingVm),
                 borderRadius: BorderRadius.circular(20),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: _isClockedIn
+                    color: isClockedIn
                         ? Colors.red.shade50
                         : AppTheme.primary.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: _isClockedIn
+                      color: isClockedIn
                           ? Colors.red.shade200
                           : AppTheme.primary.withValues(alpha: 0.2),
                     ),
@@ -230,16 +182,16 @@ class _DailyQuotaCardState extends State<DailyQuotaCard> {
                         height: 7,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _isClockedIn ? Colors.red : AppTheme.primary,
+                          color: isClockedIn ? Colors.red : AppTheme.primary,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        _isClockedIn ? 'Clock Out' : 'Clock In',
+                        isClockedIn ? 'Clock Out' : 'Clock In',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: _isClockedIn ? Colors.red.shade700 : AppTheme.primary,
+                          color: isClockedIn ? Colors.red.shade700 : AppTheme.primary,
                         ),
                       ),
                     ],

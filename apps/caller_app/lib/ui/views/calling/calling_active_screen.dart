@@ -54,13 +54,58 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
 
   Future<void> _startVerificationFlow() async {
     final callingVm = context.read<CallingViewModel>();
+    // STRICT PRIVACY GUARANTEE: If clocked out, NEVER read call logs or trigger detection
+    if (!callingVm.isClockedIn) {
+      if (mounted) {
+        context.go('/dialog');
+      }
+      return;
+    }
+
     if (callingVm.isDetectingCallLog) return;
 
-    // Start native call-log detection
+    // Start native call-log detection only while clocked in
     await callingVm.detectCallLog();
 
     if (mounted) {
       context.go('/dialog');
+    }
+  }
+
+  Future<void> _handleBack(BuildContext context) async {
+    final callingVm = context.read<CallingViewModel>();
+    if (callingVm.activeAttempt == null || callingVm.activeLead == null) {
+      callingVm.cancelOrDiscardAttempt();
+      if (context.mounted) {
+        context.go('/queue');
+      }
+      return;
+    }
+
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Call Attempt?'),
+        content: const Text(
+          'Are you sure you want to cancel and return to the lead queue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep Calling'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Cancel Call'),
+          ),
+        ],
+      ),
+    );
+
+    if (discard == true && context.mounted) {
+      callingVm.cancelOrDiscardAttempt();
+      context.go('/queue');
     }
   }
 
@@ -70,9 +115,33 @@ class _CallingActiveScreenState extends State<CallingActiveScreen>
     final lead = callingVm.activeLead;
 
     return PopScope(
-      canPop: false, // Call Lock prevents bypassing (§5)
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBack(context);
+      },
       child: Scaffold(
         backgroundColor: Colors.white,
+        appBar: AppBar(
+          title: const Text('Call In Progress'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Cancel & Return to Queue',
+            onPressed: () => _handleBack(context),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => _handleBack(context),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(
+                  color: AppTheme.danger,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),

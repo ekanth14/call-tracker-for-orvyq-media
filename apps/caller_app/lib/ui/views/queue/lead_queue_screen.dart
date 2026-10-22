@@ -43,6 +43,7 @@ class _LeadQueueScreenState extends State<LeadQueueScreen> {
     await Future.wait([
       queueVm.loadLeads(),
       callingVm.checkCallLock(),
+      callingVm.fetchWorkStatus(),
       statsVm.loadTodayStats(),
     ]);
 
@@ -68,10 +69,92 @@ class _LeadQueueScreenState extends State<LeadQueueScreen> {
       return;
     }
 
+    // Work Login Check: Callers must clock in before initiating lead calls (§1 & §2)
+    if (!callingVm.isClockedIn) {
+      final shouldClockIn = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.access_time_rounded, color: AppTheme.primary),
+              SizedBox(width: 8),
+              Text('Start Shift to Call'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'You are currently Off Duty. You must clock in (Start Shift) to begin your work period before placing calls to leads.',
+                style: TextStyle(fontSize: 14, color: AppTheme.textMain),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, size: 18, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Privacy Guarantee: Call tracking is active ONLY during work periods for assigned leads. Personal calls while off duty are never monitored or tracked.',
+                        style: TextStyle(fontSize: 12, color: Colors.blueGrey),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              icon: const Icon(Icons.login_rounded, size: 16),
+              label: const Text('Clock In & Call'),
+              onPressed: () => Navigator.of(ctx).pop(true),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldClockIn != true) return;
+
+      final clockedIn = await callingVm.clockIn();
+      if (!clockedIn) {
+        if (mounted && callingVm.errorMessage != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(callingVm.errorMessage!),
+              backgroundColor: AppTheme.danger,
+            ),
+          );
+        }
+        return;
+      }
+    }
+
     final success = await callingVm.initiateCall(lead);
     if (success && mounted) {
       // Navigate to the active calling / waiting screen
       context.push('/calling');
+    } else if (!success && mounted && callingVm.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(callingVm.errorMessage!),
+          backgroundColor: AppTheme.danger,
+        ),
+      );
     }
   }
 
@@ -144,6 +227,10 @@ class _LeadQueueScreenState extends State<LeadQueueScreen> {
               stats: statsVm.stats,
               onRefresh: () => statsVm.loadTodayStats(),
             ),
+            const SizedBox(height: 12),
+
+            // Work Shift & Off-Duty Privacy Banner
+            _buildWorkStatusBanner(context, callingVm),
             const SizedBox(height: 12),
 
             // Mandatory 2-Hour Daily Work Quota Card (Interpretation A)
@@ -275,6 +362,122 @@ class _LeadQueueScreenState extends State<LeadQueueScreen> {
       ),
       side: BorderSide(
         color: isSelected ? AppTheme.primary : AppTheme.border,
+      ),
+    );
+  }
+
+  Widget _buildWorkStatusBanner(BuildContext context, CallingViewModel callingVm) {
+    final isClockedIn = callingVm.isClockedIn;
+    final isLoading = callingVm.isWorkStatusLoading;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isClockedIn ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isClockedIn ? const Color(0xFFA7F3D0) : const Color(0xFFFDE68A),
+          width: 1.2,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isClockedIn ? const Color(0xFFD1FAE5) : const Color(0xFFFEF3C7),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isClockedIn ? Icons.work_history_rounded : Icons.work_off_outlined,
+              size: 20,
+              color: isClockedIn ? const Color(0xFF047857) : const Color(0xFFB45309),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isClockedIn ? const Color(0xFF10B981) : Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isClockedIn ? 'ON DUTY (Active Shift)' : 'OFF DUTY (Logged Out)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: isClockedIn ? const Color(0xFF065F46) : const Color(0xFF92400E),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isClockedIn
+                      ? 'Call tracking active for leads • Personal calls excluded'
+                      : 'Call tracking paused • Personal calls strictly private',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isClockedIn ? const Color(0xFF047857) : const Color(0xFFB45309),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: isClockedIn ? Colors.red.shade600 : AppTheme.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: const Size(0, 36),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: isLoading
+                ? null
+                : () async {
+                    if (isClockedIn) {
+                      final success = await callingVm.clockOut();
+                      if (!success && context.mounted && callingVm.errorMessage != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(callingVm.errorMessage!),
+                            backgroundColor: AppTheme.danger,
+                          ),
+                        );
+                      }
+                    } else {
+                      final success = await callingVm.clockIn();
+                      if (!success && context.mounted && callingVm.errorMessage != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(callingVm.errorMessage!),
+                            backgroundColor: AppTheme.danger,
+                          ),
+                        );
+                      }
+                    }
+                  },
+            child: isLoading
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Text(
+                    isClockedIn ? 'Clock Out' : 'Clock In',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+          ),
+        ],
       ),
     );
   }

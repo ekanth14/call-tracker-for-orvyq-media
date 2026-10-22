@@ -18,10 +18,18 @@ class _ChatScreenState extends State<ChatScreen> {
   String _currentUserName = 'Caller';
   String _currentUserRole = 'caller';
 
+  // Persistent stream initialized once in initState to avoid duplicate channel connections
+  late final Stream<List<Map<String, dynamic>>> _messagesStream;
+  int _lastMessageCount = 0;
+
   @override
   void initState() {
     super.initState();
     _loadCurrentUser();
+    _messagesStream = Supabase.instance.client
+        .from('team_messages')
+        .stream(primaryKey: ['id'])
+        .order('created_at', ascending: true);
   }
 
   @override
@@ -68,7 +76,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final content = _messageController.text.trim();
     if (content.isEmpty || _isSending || _currentUserId == null) return;
 
-    setState(() => _isSending = true);
+    // Synchronously lock sending state to prevent double-tap re-entrancy
+    _isSending = true;
+    setState(() {});
     _messageController.clear();
 
     final supabase = Supabase.instance.client;
@@ -97,8 +107,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final supabase = Supabase.instance.client;
-
     return Scaffold(
       appBar: AppBar(
         title: const Row(
@@ -111,13 +119,10 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Stream of Messages
+          // Stream of Messages with Primary Key Deduplication
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: supabase
-                  .from('team_messages')
-                  .stream(primaryKey: ['id'])
-                  .order('created_at', ascending: true),
+              stream: _messagesStream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
@@ -132,7 +137,23 @@ class _ChatScreenState extends State<ChatScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final messages = snapshot.data!;
+                // Explicit primary-key deduplication: guarantees no duplicate bubbles occur
+                final rawMessages = snapshot.data!;
+                final uniqueMap = <String, Map<String, dynamic>>{};
+                for (final msg in rawMessages) {
+                  final id = msg['id']?.toString() ?? '';
+                  if (id.isNotEmpty) {
+                    uniqueMap[id] = msg;
+                  }
+                }
+
+                final messages = uniqueMap.values.toList()
+                  ..sort((a, b) {
+                    final aTime = a['created_at']?.toString() ?? '';
+                    final bTime = b['created_at']?.toString() ?? '';
+                    return aTime.compareTo(bTime);
+                  });
+
                 if (messages.isEmpty) {
                   return Center(
                     child: Column(
@@ -162,7 +183,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   );
                 }
 
-                WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                if (messages.length != _lastMessageCount) {
+                  _lastMessageCount = messages.length;
+                  WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                }
 
                 return ListView.builder(
                   controller: _scrollController,
@@ -172,6 +196,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     final msg = messages[index];
                     final isMe = msg['sender_id'] == _currentUserId;
                     final isAnnouncement = msg['is_announcement'] == true;
+                    final isEdited = msg['is_edited'] == true;
                     final senderName = msg['sender_name'] ?? 'Unknown';
                     final senderRole = msg['sender_role'] ?? 'caller';
                     final content = msg['content'] ?? '';
@@ -211,12 +236,29 @@ class _ChatScreenState extends State<ChatScreen> {
                                           color: Colors.amber.shade900,
                                         ),
                                       ),
-                                      Text(
-                                        timeStr,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.amber.shade800,
-                                        ),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (isEdited)
+                                            Padding(
+                                              padding: const EdgeInsets.only(right: 4),
+                                              child: Text(
+                                                '(edited)',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontStyle: FontStyle.italic,
+                                                  color: Colors.amber.shade700,
+                                                ),
+                                              ),
+                                            ),
+                                          Text(
+                                            timeStr,
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.amber.shade800,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
@@ -237,6 +279,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       );
                     }
 
+                    // Employees/callers are strictly restricted from editing and deleting.
+                    // Plain message bubble with no delete or edit action triggers.
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
@@ -314,12 +358,29 @@ class _ChatScreenState extends State<ChatScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 3),
-                                Text(
-                                  timeStr,
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    color: isMe ? Colors.white70 : AppTheme.textMuted,
-                                  ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (isEdited)
+                                      Padding(
+                                        padding: const EdgeInsets.only(right: 3),
+                                        child: Text(
+                                          '(edited)',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontStyle: FontStyle.italic,
+                                            color: isMe ? Colors.white70 : AppTheme.textMuted,
+                                          ),
+                                        ),
+                                      ),
+                                    Text(
+                                      timeStr,
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        color: isMe ? Colors.white70 : AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
@@ -336,7 +397,7 @@ class _ChatScreenState extends State<ChatScreen> {
           // Message Input Bar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: Colors.white,
               border: Border(top: BorderSide(color: AppTheme.border)),
             ),

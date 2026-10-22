@@ -21,16 +21,23 @@ class CallLogService {
   /// Retries up to [timeout] duration because OEMs write the log asynchronously (§5.3).
   ///
   /// CRITICAL PRIVACY RULE (§6):
+  /// Call logs are ONLY queried and matched when [isClockedIn] is true.
+  /// If [isClockedIn] is false (off duty / work logout), call log access is COMPLETELY BYPASSED.
   /// Only outgoing entries matching [leadPhoneE164] are ever processed.
   /// All personal calls and non-matching entries are immediately discarded on-device.
   Future<DeviceCallLogModel?> matchOutgoingCallForLead({
     required String leadPhoneE164,
     required DateTime dialedAfter,
+    bool isClockedIn = true,
     Duration timeout = const Duration(seconds: 15),
     Duration interval = const Duration(milliseconds: 1500),
     void Function(int secondsRemaining)? onProgress,
   }) async {
-    final targetDigits = _extractSignificantDigits(leadPhoneE164);
+    // STRICT PRIVACY GUARANTEE: Never query CallLog if off duty
+    if (!isClockedIn) {
+      return null;
+    }
+
     final startTime = DateTime.now();
     // Query entries starting 2 minutes prior to dial tap to tolerate clock skew (§7)
     final fromEpoch =
@@ -42,8 +49,14 @@ class CallLogService {
       onProgress?.call(remaining > 0 ? remaining : 0);
 
       try {
+        final toEpoch = DateTime.now()
+            .add(const Duration(minutes: 1))
+            .millisecondsSinceEpoch;
+
         final Iterable<CallLogEntry> entries = await CallLog.query(
           dateFrom: fromEpoch,
+          dateTo: toEpoch,
+          type: CallType.outgoing,
         );
 
         // Sort descending by timestamp (newest first)
@@ -57,14 +70,9 @@ class CallLogService {
           }
 
           final entryNumber = entry.number ?? '';
-          final entryDigits = _extractSignificantDigits(entryNumber);
 
-          // 2. Strict Lead Matching (§6 Privacy Guard)
-          if (entryDigits.isNotEmpty &&
-              targetDigits.isNotEmpty &&
-              (entryDigits == targetDigits ||
-                  entryDigits.endsWith(targetDigits) ||
-                  targetDigits.endsWith(entryDigits))) {
+          // 2. Strict Lead Matching (Safe 10-digit subscriber match, no short suffixes)
+          if (isPhoneNumberMatch(entryNumber, leadPhoneE164)) {
             // Matched!
             final callStartedAt = DateTime.fromMillisecondsSinceEpoch(
               entry.timestamp ?? dialedAfter.millisecondsSinceEpoch,
@@ -93,13 +101,40 @@ class CallLogService {
     return null;
   }
 
-  /// Extracts the last 10 digits for Indian standard numbers to ensure robust matching
-  /// against local dial patterns (e.g. 08971027214, +918971027214, 8971027214).
-  static String _extractSignificantDigits(String phone) {
-    final digits = phone.replaceAll(RegExp(r'\D'), '');
-    if (digits.length > 10) {
-      return digits.substring(digits.length - 10);
+  /// Safely checks if a raw call log number matches the assigned lead phone number.
+  /// Enforces a minimum 10-digit subscriber number match and prohibits dangerous
+  /// short-suffix matching (which could erroneously match personal or extension calls).
+  bool isPhoneNumberMatch(String rawEntryNumber, String leadPhoneE164) =>
+      isNumberMatch(rawEntryNumber, leadPhoneE164);
+
+  static bool isNumberMatch(String rawEntryNumber, String leadPhoneE164) {
+    final entryDigits = rawEntryNumber.replaceAll(RegExp(r'\D'), '');
+    final targetDigits = leadPhoneE164.replaceAll(RegExp(r'\D'), '');
+
+    // Discard any entry numbers that lack full 10-digit national subscriber length
+    if (entryDigits.length < 10 || targetDigits.length < 10) {
+      return false;
     }
-    return digits;
+
+    // Extract exact 10-digit national subscriber number
+    final entry10 = entryDigits.substring(entryDigits.length - 10);
+    final target10 = targetDigits.substring(targetDigits.length - 10);
+
+    if (entry10 != target10) {
+      return false;
+    }
+
+    // Verify any remaining prefix is only a valid dialing prefix (trunk 0 or country code 91)
+    final entryPrefix = entryDigits.substring(0, entryDigits.length - 10);
+    if (entryPrefix.isNotEmpty && entryPrefix != '0' && entryPrefix != '91') {
+      return false;
+    }
+
+    final targetPrefix = targetDigits.substring(0, targetDigits.length - 10);
+    if (targetPrefix.isNotEmpty && targetPrefix != '0' && targetPrefix != '91') {
+      return false;
+    }
+
+    return true;
   }
 }

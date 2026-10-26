@@ -320,4 +320,27 @@ To support **Apple iOS (iPhone & iPad)** users without requiring manual IPA side
 6. **Verified Automated Test Suite:**
    - All 24 unit tests in `apps/web` passing (`tests/caller_app.test.ts`, `tests/chat_moderation.test.ts`, `tests/leads_and_callers_management.test.ts`, `tests/phone.test.ts`).
 
+---
+
+## 11. Visual Documentation & UI Artifacts
+
+High-resolution visual captures of the application workflows have been committed directly into [`docs/assets/screenshots/`](assets/screenshots/):
+
+| Visual Asset | Screen Description | Key Features Highlighted |
+| :--- | :--- | :--- |
+| [`01_android_caller_login.png`](assets/screenshots/01_android_caller_login.png) | Android Caller Sign-In Screen | Clean auth entry, error states, and session persistence. |
+| [`02_privacy_consent_terms.png`](assets/screenshots/02_privacy_consent_terms.png) | Worker Privacy & On-Device Consent Notice | Explicit acknowledgement that only assigned calls are checked. |
+| [`03_caller_queue_off_duty.png`](assets/screenshots/03_caller_queue_off_duty.png) | Lead Queue (Off-Duty State) | Visual off-duty alert banner; call actions blocked until shift starts. |
+| [`04_shift_started_on_duty.png`](assets/screenshots/04_shift_started_on_duty.png) | Lead Queue (Active Shift - On Duty) | Emerald ON DUTY badge, live shift ticker, daily quota progress card. |
+| [`05_native_dialer_intent.png`](assets/screenshots/05_native_dialer_intent.png) | Native Phone Dialer Intent | Dialer launched via Android Intent; Call Lock enforced on queue. |
+| [`06_post_call_verification_timer.png`](assets/screenshots/06_post_call_verification_timer.png) | Verification Stopwatch & Call Log Matcher | Live countdown while searching call log; manual duration override. |
+| [`07_disposition_outcome_selection.png`](assets/screenshots/07_disposition_outcome_selection.png) | Post-Call Disposition Form | 30s duration preset, `Interested` outcome, and reason tags. |
+| [`08_verified_queue_unlocked.png`](assets/screenshots/08_verified_queue_unlocked.png) | Unlocked Queue After Submission | Successful submission toast; lead updated; queue unlocked for next call. |
+| [`09_privacy_guard_off_duty_blocked.png`](assets/screenshots/09_privacy_guard_off_duty_blocked.png) | Off-Duty Privacy Guard Dialog | Hard blocking modal when attempting to call while clocked out. |
+| [`10_realtime_team_chat.png`](assets/screenshots/10_realtime_team_chat.png) | Real-time Team Chat Screen | Real-time communication feed with sender roles and moderation rules. |
+| [`11_daily_quota_and_shift_summary.png`](assets/screenshots/11_daily_quota_and_shift_summary.png) | Shift Summary & Profile Metrics | Total active work duration today, calls made, and quota progress. |
+| [`web_login.png`](assets/screenshots/web_login.png) | Desktop Owner Management Portal | Centralized web login with role-based routing and branding. |
+| [`12_ios_mobile_pwa_login.png`](assets/screenshots/12_ios_mobile_pwa_login.png) | iOS Mobile Safari PWA Interface | Safe-area optimized mobile web app ready for "Add to Home Screen". |
+
+
 
